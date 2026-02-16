@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -9,13 +7,12 @@ import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'home.dart';
 import 'globals.dart';
 import 'utils/charts.dart';
-import 'utils/variables.dart';
 import 'utils/sizeConfig.dart';
 import 'ble/ble_scanner.dart';
 import 'utils/logDataToFile.dart';
 import 'states/OpenViewBLEProvider.dart';
-import 'package:flutter_switch/flutter_switch.dart';
 import 'package:flutter/src/foundation/change_notifier.dart';
+import 'protocol/protocol.dart';
 
 class PlotSerialPage extends StatefulWidget {
   const PlotSerialPage({
@@ -36,6 +33,9 @@ class PlotSerialPage extends StatefulWidget {
 class _PlotSerialPageState extends State<PlotSerialPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
   Key key = UniqueKey();
+
+  late final PacketFramer _framer;
+  late final BoardDecoder? _decoder;
 
   final ecgLineData = <FlSpot>[];
   final ppgLineData = <FlSpot>[];
@@ -82,6 +82,12 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
   @override
   void initState() {
     super.initState();
+
+    _framer = PacketFramer(
+      onPacket: _onPacketReceived,
+      onError: (msg) => print('PacketFramer: $msg'),
+    );
+    _decoder = decoderForBoard(widget.selectedPortBoard);
 
     SystemChrome.setPreferredOrientations(
         [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
@@ -179,7 +185,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       serialStream.stream.listen(
             (event) {
           for (int i = 0; i < event.length; i++) {
-            pcProcessData(event[i]);
+            _framer.processByte(event[i]);
           }
         },
         onError: (error) {
@@ -367,687 +373,96 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
     );
   }
 
-  void pcProcessData(int rxch) async {
-    switch (pc_rx_state) {
-      case CESState_Init:
-        if (rxch == CES_CMDIF_PKT_START_1) {
-          pc_rx_state = CESState_SOF1_Found;
-        }
-        break;
-      case CESState_SOF1_Found:
-        if (rxch == CES_CMDIF_PKT_START_2) {
-          pc_rx_state = CESState_SOF2_Found;
-        } else {
-          pc_rx_state = CESState_Init; //Invalid Packet, reset state to init
-        }
-        break;
-      case CESState_SOF2_Found:
-        pc_rx_state = CESState_PktLen_Found;
-        CES_Pkt_Len = rxch;
-        CES_Pkt_Pos_Counter = CES_CMDIF_IND_LEN;
-        CES_Data_Counter = 0;
-        CES_ECG_RESP_Data_Counter = 0;
-        CES_PPG_Data_Counter = 0;
-        break;
-      case CESState_PktLen_Found:
-        CES_Pkt_Pos_Counter++;
-        if (CES_Pkt_Pos_Counter < CES_CMDIF_PKT_OVERHEAD) //Read Header
-            {
-          if (CES_Pkt_Pos_Counter == CES_CMDIF_IND_LEN_MSB) {
-            CES_Pkt_Len = ((rxch << 8) | CES_Pkt_Len);
-          } else if (CES_Pkt_Pos_Counter == CES_CMDIF_IND_PKTTYPE) {
-            CES_Pkt_PktType = rxch;
-          }
-        } else if ((CES_Pkt_Pos_Counter >= CES_CMDIF_PKT_OVERHEAD) &&
-            (CES_Pkt_Pos_Counter <
-                CES_CMDIF_PKT_OVERHEAD + CES_Pkt_Len + 1)) //Read Data
-            {
-          if (CES_Pkt_PktType == 2) {
-            CES_Pkt_Data_Counter[CES_Data_Counter++] =
-            (rxch); // Buffer that assigns the data separated from the packet
-          } else if (CES_Pkt_PktType == 3) {
-            CES_Pkt_ECG_RESP_Data_Counter[CES_ECG_RESP_Data_Counter++] = (rxch);
-          } else if (CES_Pkt_PktType == 4) {
-            CES_Pkt_PPG_Data_Counter[CES_PPG_Data_Counter++] = (rxch);
-          } else {
-            // Do nothing
-          }
-        } else //All data received
-            {
-          if (rxch == CES_CMDIF_PKT_STOP) {
-            if (widget.selectedPortBoard == "Healthypi (USB)") {
-              if (CES_Pkt_PktType == 4) {
-                for (int i = 0; i < 8; i++) {
-                  ces_pkt_ch3_buffer[0] = CES_Pkt_PPG_Data_Counter[(i * 2)];
-                  ces_pkt_ch3_buffer[1] = CES_Pkt_PPG_Data_Counter[(i * 2) + 1];
-                  int data3 =
-                  ces_pkt_ch3_buffer[0] | ces_pkt_ch3_buffer[1] << 8;
-
-                  setStateIfMounted(() {
-                    ppgLineData.add(FlSpot(ppgDataCounter++, ((data3).toDouble())));
-
-                    if (startDataLogging == true) {
-                      ppgDataLog.add((data3.toSigned(32)).toDouble());
-                    }
-                  });
-
-                  // Apply corrected window size management
-                  double windowSizeInSamples = boardSamplingRate * _plotWindowSeconds.toDouble();
-                  _manageDataWindow(ppgLineData, windowSizeInSamples);
-                }
-
-                setStateIfMounted(() {
-                  globalSpO2 = (CES_Pkt_PPG_Data_Counter[16]).toInt();
-                  if (globalSpO2 == 25) {
-                    displaySpO2 = "--";
-                  } else {
-                    displaySpO2 = "$globalSpO2 %";
-                  }
-
-                  globalTemp = (((CES_Pkt_PPG_Data_Counter[17] |
-                  CES_Pkt_PPG_Data_Counter[18] << 8)
-                      .toInt()) /
-                      100.00)
-                      .toDouble();
-                });
-              }
-              if (CES_Pkt_PktType == 3) {
-                for (int i = 0; i < 8; i++) {
-                  ces_pkt_ch1_buffer[0] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4)];
-                  ces_pkt_ch1_buffer[1] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4) + 1];
-                  ces_pkt_ch1_buffer[2] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4) + 2];
-                  ces_pkt_ch1_buffer[3] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4) + 3];
-
-                  int data1 = ces_pkt_ch1_buffer[0] |
-                  ces_pkt_ch1_buffer[1] << 8 |
-                  ces_pkt_ch1_buffer[2] << 16 |
-                  ces_pkt_ch1_buffer[3] << 24;
-
-                  setStateIfMounted(() {
-                    ecgLineData.add(FlSpot(ecgDataCounter++, ((data1.toSigned(32)).toDouble())));
-                    if (startDataLogging == true) {
-                      ecgDataLog.add((data1.toSigned(32)).toDouble());
-                    }
-                  });
-
-                  // Apply corrected window size management
-                  double windowSizeInSamples = boardSamplingRate * _plotWindowSeconds.toDouble();
-                  _manageDataWindow(ecgLineData, windowSizeInSamples);
-                }
-
-                for (int i = 0; i < 4; i++) {
-                  ces_pkt_ch2_buffer[0] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4) + 32];
-                  ces_pkt_ch2_buffer[1] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4) + 33];
-                  ces_pkt_ch2_buffer[2] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4) + 34];
-                  ces_pkt_ch2_buffer[3] =
-                  CES_Pkt_ECG_RESP_Data_Counter[(i * 4) + 35];
-
-                  int data2 = ces_pkt_ch2_buffer[0] |
-                  ces_pkt_ch2_buffer[1] << 8 |
-                  ces_pkt_ch2_buffer[2] << 16 |
-                  ces_pkt_ch2_buffer[3] << 24;
-
-                  setStateIfMounted(() {
-                    respLineData.add(FlSpot(respDataCounter++, ((data2.toSigned(32)).toDouble())));
-
-                    if (startDataLogging == true) {
-                      respDataLog.add((data2.toSigned(32)).toDouble());
-                    }
-                  });
-
-                  // Apply corrected window size management
-                  double windowSizeInSamples = boardSamplingRate * _plotWindowSeconds.toDouble();
-                  _manageDataWindow(respLineData, windowSizeInSamples);
-
-                }
-
-                setStateIfMounted(() {
-                  globalHeartRate = (CES_Pkt_ECG_RESP_Data_Counter[48]).toInt();
-                  globalRespRate = (CES_Pkt_ECG_RESP_Data_Counter[49]).toInt();
-                });
-
-              } else if (CES_Pkt_PktType == 2) {
-                ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-                ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-                ces_pkt_ch1_buffer[2] = CES_Pkt_Data_Counter[2];
-                ces_pkt_ch1_buffer[3] = CES_Pkt_Data_Counter[3];
-
-                ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[4];
-                ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[5];
-                ces_pkt_ch2_buffer[2] = CES_Pkt_Data_Counter[6];
-                ces_pkt_ch2_buffer[3] = CES_Pkt_Data_Counter[7];
-
-                ces_pkt_ch3_buffer[0] = CES_Pkt_Data_Counter[9]; //ir
-                ces_pkt_ch3_buffer[1] = CES_Pkt_Data_Counter[10];
-                ces_pkt_ch3_buffer[2] = CES_Pkt_Data_Counter[11];
-                ces_pkt_ch3_buffer[3] = CES_Pkt_Data_Counter[12];
-
-                int data1 = ces_pkt_ch1_buffer[0] |
-                ces_pkt_ch1_buffer[1] << 8 |
-                ces_pkt_ch1_buffer[2] << 16 |
-                ces_pkt_ch1_buffer[3] << 24;
-                int data2 = ces_pkt_ch2_buffer[0] |
-                ces_pkt_ch2_buffer[1] << 8 |
-                ces_pkt_ch2_buffer[2] << 16 |
-                ces_pkt_ch2_buffer[3] << 24;
-                int data3 = ces_pkt_ch3_buffer[0] |
-                ces_pkt_ch3_buffer[1] << 8 |
-                ces_pkt_ch3_buffer[2] << 16 |
-                ces_pkt_ch3_buffer[3] << 24;
-
-                setStateIfMounted(() {
-                  ecgLineData.add(FlSpot(
-                      ecgDataCounter++, ((data1.toSigned(32)).toDouble())));
-                  respLineData.add(FlSpot(
-                      respDataCounter++, (data2.toSigned(32).toDouble())));
-                  ppgLineData.add(FlSpot(
-                      ppgDataCounter++, (data3.toSigned(32).toDouble())));
-
-                  if (startDataLogging == true) {
-                    ecgDataLog.add((data1.toSigned(32)).toDouble());
-                    ppgDataLog.add(data3.toDouble());
-                    respDataLog.add(data2.toDouble());
-                  }
-
-                  globalSpO2 = (CES_Pkt_Data_Counter[19]).toInt();
-                  if (globalSpO2 == 25) {
-                    displaySpO2 = "--";
-                  } else {
-                    displaySpO2 = "$globalSpO2 %";
-                  }
-                  globalHeartRate = (CES_Pkt_Data_Counter[20]).toInt();
-                  globalRespRate = (CES_Pkt_Data_Counter[21]).toInt();
-                  globalTemp = (((CES_Pkt_Data_Counter[17] |
-                  CES_Pkt_Data_Counter[18] << 8)
-                      .toInt()) /
-                      100.00)
-                      .toDouble();
-                });
-
-                // Apply window size management
-                double windowSizeInSamples = boardSamplingRate * _plotWindowSeconds.toDouble();
-                _manageDataWindow(ecgLineData, windowSizeInSamples);
-                _manageDataWindow(ppgLineData, windowSizeInSamples);
-                _manageDataWindow(respLineData, windowSizeInSamples);
-
-              } else {
-                if (CES_Pkt_PktType == 2 ||
-                    CES_Pkt_PktType == 3 ||
-                    CES_Pkt_PktType == 4) {
-                  // Do nothing
-                } else {
-                  if (widget.selectedPort.isOpen) {
-                    widget.selectedPort.close();
-                    _showAlertDialog();
-                  }
-                }
-              }
-
-              pc_rx_state = CESState_Init;
-            } else if (widget.selectedPortBoard ==
-                "ADS1293 Breakout/Shield (USB)") {
-              ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-              ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-              ces_pkt_ch1_buffer[2] = CES_Pkt_Data_Counter[2];
-              ces_pkt_ch1_buffer[3] = CES_Pkt_Data_Counter[3];
-
-              ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[4];
-              ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[5];
-              ces_pkt_ch2_buffer[2] = CES_Pkt_Data_Counter[6];
-              ces_pkt_ch2_buffer[3] = CES_Pkt_Data_Counter[7];
-
-              ces_pkt_ch3_buffer[0] = CES_Pkt_Data_Counter[8];
-              ces_pkt_ch3_buffer[1] = CES_Pkt_Data_Counter[9];
-              ces_pkt_ch3_buffer[2] = CES_Pkt_Data_Counter[10];
-              ces_pkt_ch3_buffer[3] = CES_Pkt_Data_Counter[11];
-
-              int data1 = ces_pkt_ch1_buffer[0] |
-              ces_pkt_ch1_buffer[1] << 8 |
-              ces_pkt_ch1_buffer[2] << 16 |
-              ces_pkt_ch1_buffer[3] << 24;
-
-              int data2 = ces_pkt_ch2_buffer[0] |
-              ces_pkt_ch2_buffer[1] << 8 |
-              ces_pkt_ch2_buffer[2] << 16 |
-              ces_pkt_ch2_buffer[3] << 24;
-
-              int data3 = ces_pkt_ch3_buffer[0] |
-              ces_pkt_ch3_buffer[1] << 8 |
-              ces_pkt_ch3_buffer[2] << 16 |
-              ces_pkt_ch3_buffer[3] << 24;
-
-              setStateIfMounted(() {
-                ecgLineData.add(FlSpot(
-                    ecgDataCounter++, ((data1.toSigned(32)).toDouble())));
-                respLineData.add(
-                    FlSpot(respDataCounter++, (data2.toSigned(32).toDouble())));
-                ppgLineData.add(
-                    FlSpot(ppgDataCounter++, (data3.toSigned(32).toDouble())));
-
-                if (startDataLogging == true) {
-                  ecgDataLog.add((data1.toSigned(32) / 1000.00).toDouble());
-                  ppgDataLog.add(data3.toDouble());
-                  respDataLog.add(data2.toDouble());
-                }
-              });
-
-              // Apply window size management
-              _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-              _manageDataWindow(ppgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-              _manageDataWindow(respLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-              pc_rx_state = CESState_Init;
-            } else if (widget.selectedPortBoard ==
-                "AFE4490 Breakout/Shield (USB)" ||
-                widget.selectedPortBoard == "Sensything Ox (USB)") {
-              ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-              ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-              ces_pkt_ch1_buffer[2] = CES_Pkt_Data_Counter[2];
-              ces_pkt_ch1_buffer[3] = CES_Pkt_Data_Counter[3];
-
-              ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[4];
-              ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[5];
-              ces_pkt_ch2_buffer[2] = CES_Pkt_Data_Counter[6];
-              ces_pkt_ch2_buffer[3] = CES_Pkt_Data_Counter[7];
-
-              int data1 = ces_pkt_ch1_buffer[0] |
-              ces_pkt_ch1_buffer[1] << 8 |
-              ces_pkt_ch1_buffer[2] << 16 |
-              ces_pkt_ch1_buffer[3] << 24;
-
-              int data2 = ces_pkt_ch2_buffer[0] |
-              ces_pkt_ch2_buffer[1] << 8 |
-              ces_pkt_ch2_buffer[2] << 16 |
-              ces_pkt_ch2_buffer[3] << 24;
-
-              computed_val1 = CES_Pkt_Data_Counter[8];
-              computed_val2 = CES_Pkt_Data_Counter[9];
-
-              setStateIfMounted(() {
-                ecgLineData.add(FlSpot(ecgDataCounter++, (data1.toDouble())));
-                ppgLineData.add(FlSpot(ppgDataCounter++, (data2.toDouble())));
-
-                if (startDataLogging == true) {
-                  ecgDataLog.add(data1.toDouble());
-                  ppgDataLog.add(data2.toDouble());
-                }
-
-                globalHeartRate = (computed_val2).toInt();
-                globalSpO2 = (computed_val1).toInt();
-                if (globalSpO2 == 25) {
-                  displaySpO2 = "--";
-                } else {
-                  displaySpO2 = "$globalSpO2 %";
-                }
-              });
-
-              // Apply window size management
-              _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-              _manageDataWindow(ppgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-              pc_rx_state = CESState_Init;
-            } else if (widget.selectedPortBoard == "MAX86150 Breakout (USB)") {
-              ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-              ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-
-              ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[2];
-              ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[3];
-
-              ces_pkt_ch3_buffer[0] = CES_Pkt_Data_Counter[4];
-              ces_pkt_ch3_buffer[1] = CES_Pkt_Data_Counter[5];
-
-              int value1 = ces_pkt_ch1_buffer[0] |
-              ces_pkt_ch1_buffer[1] <<
-                  8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-              value1 <<= 16;
-              value1 >>= 16;
-              int data1 = value1;
-
-              int value2 = ces_pkt_ch2_buffer[0] |
-              ces_pkt_ch2_buffer[1] <<
-                  8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-              value2 <<= 16;
-              value2 >>= 16;
-
-              int data2 = value2;
-
-              int value3 = ces_pkt_ch3_buffer[0] |
-              ces_pkt_ch3_buffer[1] <<
-                  8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-              value3 <<= 16;
-              value3 >>= 16;
-
-              int data3 = value3;
-
-              setStateIfMounted(() {
-                ecgLineData.add(FlSpot(ecgDataCounter++, (data1.toSigned(16).toDouble())));
-                respLineData.add(FlSpot(respDataCounter++, (data2.toDouble())));
-                ppgLineData.add(FlSpot(ppgDataCounter++, (data3.toDouble())));
-
-                if (startDataLogging == true) {
-                  ecgDataLog.add(data1.toDouble());
-                  ppgDataLog.add(data3.toDouble());
-                  respDataLog.add(data2.toDouble());
-                }
-              });
-
-              // Apply window size management
-              _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-              _manageDataWindow(ppgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-              _manageDataWindow(respLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-              pc_rx_state = CESState_Init;
-            } else if (widget.selectedPortBoard == "Pulse Express (USB)") {
-              ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-              ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-
-              ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[2];
-              ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[3];
-
-              int data1 = ces_pkt_ch1_buffer[0] |
-              ces_pkt_ch1_buffer[1] <<
-                  8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-              int data2 = ces_pkt_ch2_buffer[0] |
-              ces_pkt_ch2_buffer[1] <<
-                  8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-
-              setStateIfMounted(() {
-                ecgLineData.add(FlSpot(ecgDataCounter++, (data1.toDouble())));
-                respLineData.add(FlSpot(respDataCounter++, (data2.toDouble())));
-
-                if (startDataLogging == true) {
-                  ecgDataLog.add(data1.toDouble());
-                  respDataLog.add(data2.toDouble());
-                }
-              });
-
-              // Apply window size management
-              _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-              _manageDataWindow(respLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-              pc_rx_state = CESState_Init;
-            } else if (widget.selectedPortBoard == "tinyGSR Breakout (USB)") {
-              ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-              ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-
-              int data1 = ces_pkt_ch1_buffer[0] |
-              ces_pkt_ch1_buffer[1] <<
-                  8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-
-              setStateIfMounted(() {
-                ecgLineData.add(
-                    FlSpot(ecgDataCounter++, (data1.toSigned(16).toDouble())));
-
-                if (startDataLogging == true) {
-                  ecgDataLog.add(data1.toDouble());
-                }
-              });
-
-              // Apply window size management
-              _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-              pc_rx_state = CESState_Init;
-            } else if (widget.selectedPortBoard ==
-                "MAX30003 ECG Breakout (USB)") {
-              ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-              ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-              ces_pkt_ch1_buffer[2] = CES_Pkt_Data_Counter[2];
-              ces_pkt_ch1_buffer[3] = CES_Pkt_Data_Counter[3];
-
-              ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[4];
-              ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[5];
-              ces_pkt_ch2_buffer[2] = CES_Pkt_Data_Counter[6];
-              ces_pkt_ch2_buffer[3] = CES_Pkt_Data_Counter[7];
-
-              ces_pkt_ch3_buffer[0] = CES_Pkt_Data_Counter[8];
-              ces_pkt_ch3_buffer[1] = CES_Pkt_Data_Counter[9];
-              ces_pkt_ch3_buffer[2] = CES_Pkt_Data_Counter[10];
-              ces_pkt_ch3_buffer[3] = CES_Pkt_Data_Counter[11];
-
-              int data1 = ces_pkt_ch1_buffer[0] |
-              ces_pkt_ch1_buffer[1] << 8 |
-              ces_pkt_ch1_buffer[2] << 16 |
-              ces_pkt_ch1_buffer[3] << 24;
-
-              int computedVal1 = ces_pkt_ch2_buffer[0] |
-              ces_pkt_ch2_buffer[1] << 8 |
-              ces_pkt_ch2_buffer[2] << 16 |
-              ces_pkt_ch2_buffer[3] << 24;
-
-              int computedVal2 = ces_pkt_ch3_buffer[0] |
-              ces_pkt_ch3_buffer[1] << 8 |
-              ces_pkt_ch3_buffer[2] << 16 |
-              ces_pkt_ch3_buffer[3] << 24;
-
-              setStateIfMounted(() {
-                ecgLineData.add(FlSpot(
-                    ecgDataCounter++, ((data1.toSigned(32)).toDouble())));
-
-                if (startDataLogging == true) {
-                  ecgDataLog.add((data1.toSigned(32) / 1000.00).toDouble());
-                }
-                globalHeartRate = (computedVal2).toInt();
-                globalRespRate = (computedVal1).toInt();
-              });
-
-              // Apply window size management
-              _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-              pc_rx_state = CESState_Init;
-            } else if (widget.selectedPortBoard == "MAX30001 ECG & BioZ Breakout (USB)") {
-              ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-              ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-              ces_pkt_ch1_buffer[2] = CES_Pkt_Data_Counter[2];
-              ces_pkt_ch1_buffer[3] = CES_Pkt_Data_Counter[3];
-
-              ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[4];
-              ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[5];
-              ces_pkt_ch2_buffer[2] = CES_Pkt_Data_Counter[6];
-              ces_pkt_ch2_buffer[3] = CES_Pkt_Data_Counter[7];
-
-              int ch2DataTag = CES_Pkt_Data_Counter[8]; // <<<< GETTING THE TAG
-
-              int data1 = ces_pkt_ch1_buffer[0] |
-              ces_pkt_ch1_buffer[1] << 8 |
-              ces_pkt_ch1_buffer[2] << 16 |
-              ces_pkt_ch1_buffer[3] << 24;
-
-              int data2 = ces_pkt_ch2_buffer[0] |
-              ces_pkt_ch2_buffer[1] << 8 |
-              ces_pkt_ch2_buffer[2] << 16 |
-              ces_pkt_ch2_buffer[3] << 24;
-
-              setStateIfMounted(() {
-                ecgLineData.add(
-                    FlSpot(ecgDataCounter++, data1.toSigned(32).toDouble())
-                );
-                // ONLY ADD PPG DATA if tag is 0
-                if (ch2DataTag == 0) {
-                  ppgLineData.add(
-                      FlSpot(ppgDataCounter++, data2.toSigned(32).toDouble())
-                  );
-                }
-                if (startDataLogging == true) {
-                  ecgDataLog.add(data1.toDouble());
-                  ppgDataLog.add(data2.toDouble());
-                }
-              });
-
-              // Apply window size management
-              _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-              _manageDataWindow(ppgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-              pc_rx_state = CESState_Init;
-            }
-          } else if (widget.selectedPortBoard == "Healthypi 6 (USB)") {
-            ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0]; // ecg 1
-            ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-            ces_pkt_ch1_buffer[2] = CES_Pkt_Data_Counter[2];
-            ces_pkt_ch1_buffer[3] = CES_Pkt_Data_Counter[3];
-
-            ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[4]; // ecg 2
-            ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[5];
-            ces_pkt_ch2_buffer[2] = CES_Pkt_Data_Counter[6];
-            ces_pkt_ch2_buffer[3] = CES_Pkt_Data_Counter[7];
-
-            ces_pkt_ch3_buffer[0] = CES_Pkt_Data_Counter[8]; // ecg 3
-            ces_pkt_ch3_buffer[1] = CES_Pkt_Data_Counter[9];
-            ces_pkt_ch3_buffer[2] = CES_Pkt_Data_Counter[10];
-            ces_pkt_ch3_buffer[3] = CES_Pkt_Data_Counter[11];
-
-            ces_pkt_ch4_buffer[0] = CES_Pkt_Data_Counter[12]; // resp
-            ces_pkt_ch4_buffer[1] = CES_Pkt_Data_Counter[13];
-            ces_pkt_ch4_buffer[2] = CES_Pkt_Data_Counter[14];
-            ces_pkt_ch4_buffer[3] = CES_Pkt_Data_Counter[15];
-
-            ces_pkt_ch5_buffer[0] = CES_Pkt_Data_Counter[16]; // ir
-            ces_pkt_ch5_buffer[1] = CES_Pkt_Data_Counter[17];
-            ces_pkt_ch5_buffer[2] = CES_Pkt_Data_Counter[18];
-            ces_pkt_ch5_buffer[3] = CES_Pkt_Data_Counter[19];
-
-            int data1 = ces_pkt_ch1_buffer[0] |
-            ces_pkt_ch1_buffer[1] << 8 |
-            ces_pkt_ch1_buffer[2] << 16 |
-            ces_pkt_ch1_buffer[3] << 24;
-
-            int data2 = ces_pkt_ch2_buffer[0] |
-            ces_pkt_ch2_buffer[1] << 8 |
-            ces_pkt_ch2_buffer[2] << 16 |
-            ces_pkt_ch2_buffer[3] << 24;
-
-            int data3 = ces_pkt_ch3_buffer[0] |
-            ces_pkt_ch3_buffer[1] << 8 |
-            ces_pkt_ch3_buffer[2] << 16 |
-            ces_pkt_ch3_buffer[3] << 24;
-
-            int data4 = ces_pkt_ch4_buffer[0] |
-            ces_pkt_ch4_buffer[1] << 8 |
-            ces_pkt_ch4_buffer[2] << 16 |
-            ces_pkt_ch4_buffer[3] << 24;
-
-            int data5 = ces_pkt_ch5_buffer[0] |
-            ces_pkt_ch5_buffer[1] << 8 |
-            ces_pkt_ch5_buffer[2] << 16 |
-            ces_pkt_ch5_buffer[3] << 24;
-
-            ecgLineData1.value.add(
-                FlSpot(ecgDataCounter++, ((data1.toSigned(32)).toDouble())));
-
-            ecg1LineData1.value.add(
-                FlSpot(ecg1DataCounter++, ((data2.toSigned(32)).toDouble())));
-
-            ecg2LineData1.value.add(
-                FlSpot(ecg2DataCounter++, ((data3.toSigned(32)).toDouble())));
-
-            respLineData1.value.add(
-                FlSpot(respDataCounter++, (data4.toSigned(32).toDouble())));
-
-            if (CES_Pkt_Data_Counter[24] == 0) {
-              // Invalid data
-            } else {
-              ppgLineData1.value.add(FlSpot(
-                  ppgDataCounter++, (data5.toUnsigned(32).toDouble())));
-            }
-
-            if (ecgDataCounter % updateInterval == 0) {
-              ecgLineData1.notifyListeners();
-              ecg1LineData1.notifyListeners();
-              ecg2LineData1.notifyListeners();
-              respLineData1.notifyListeners();
-              ppgLineData1.notifyListeners();
-            }
-
-            globalHeartRate = (CES_Pkt_ECG_RESP_Data_Counter[25] |
-            CES_Pkt_Data_Counter[26] << 8)
-                .toInt();
-            globalRespRate = (CES_Pkt_ECG_RESP_Data_Counter[28]).toInt();
-            globalSpO2 = (CES_Pkt_Data_Counter[27]).toInt();
-            globalTemp =
-                (((CES_Pkt_Data_Counter[29] | CES_Pkt_Data_Counter[30] << 8)
-                    .toInt()) /
-                    100.00)
-                    .toDouble();
-
-            // Apply window size management for ValueNotifiers
-            double maxWindowSize = boardSamplingRate * _plotWindowSeconds.toDouble();
-            _manageValueNotifierWindow(ecgLineData1, maxWindowSize);
-            _manageValueNotifierWindow(ecg1LineData1, maxWindowSize);
-            _manageValueNotifierWindow(ecg2LineData1, maxWindowSize);
-            _manageValueNotifierWindow(ppgLineData1, maxWindowSize);
-            _manageValueNotifierWindow(respLineData1, maxWindowSize);
-
-            pc_rx_state = CESState_Init;
-          } else if (widget.selectedPortBoard ==
-              "ADS1292R Breakout/Shield (USB)") {
-            ces_pkt_ch1_buffer[0] = CES_Pkt_Data_Counter[0];
-            ces_pkt_ch1_buffer[1] = CES_Pkt_Data_Counter[1];
-
-            ces_pkt_ch2_buffer[0] = CES_Pkt_Data_Counter[2];
-            ces_pkt_ch2_buffer[1] = CES_Pkt_Data_Counter[3];
-
-            int value1 = ces_pkt_ch1_buffer[0] |
-            ces_pkt_ch1_buffer[1] <<
-                8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-            value1 <<= 16;
-            value1 >>= 16;
-
-            int data1 = value1;
-
-            int value2 = ces_pkt_ch2_buffer[0] |
-            ces_pkt_ch2_buffer[1] <<
-                8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-            value2 <<= 16;
-            value2 >>= 16;
-
-            int data2 = value2;
-
-            computed_val1 = CES_Pkt_Data_Counter[4] |
-            CES_Pkt_Data_Counter[5] <<
-                8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-            computed_val1 <<= 16;
-            computed_val1 >>= 16;
-
-            computed_val2 = CES_Pkt_Data_Counter[6] |
-            CES_Pkt_Data_Counter[7] <<
-                8; //reversePacket(CES_Pkt_ECG_Counter, CES_Pkt_ECG_Counter.length-1);
-            computed_val2 <<= 16;
-            computed_val2 >>= 16;
-
-            setStateIfMounted(() {
-              ecgLineData.add(
-                  FlSpot(ecgDataCounter++, (data1.toSigned(16).toDouble())));
-              respLineData.add(
-                  FlSpot(respDataCounter++, (data2.toSigned(16).toDouble())));
-
-              if (startDataLogging == true) {
-                ecgDataLog.add(data1.toDouble());
-                respDataLog.add(data2.toDouble());
-              }
-
-              globalHeartRate = (computed_val1).toInt();
-              globalRespRate = (computed_val2).toInt();
-            });
-
-            // Apply window size management
-            _manageDataWindow(ecgLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-            _manageDataWindow(respLineData, boardSamplingRate * _plotWindowSeconds.toDouble());
-
-            pc_rx_state = CESState_Init;
-          } else {
-            pc_rx_state = CESState_Init;
-          }
-        }
-        break;
-      default:
-        break;
+  void _onPacketReceived(FramedPacket packet) {
+    final decoded = _decoder?.decode(packet);
+    if (decoded == null) return;
+
+    final windowSize = boardSamplingRate * _plotWindowSeconds.toDouble();
+    final isHpi6 = widget.selectedPortBoard == 'Healthypi 6 (USB)';
+
+    if (isHpi6) {
+      _handleHpi6Data(decoded, windowSize);
+    } else {
+      _handleStandardData(decoded, windowSize);
     }
+  }
+
+  void _handleStandardData(DecodedData decoded, double windowSize) {
+    setStateIfMounted(() {
+      for (final sample in decoded.ecgSamples) {
+        ecgLineData.add(FlSpot(ecgDataCounter++, sample));
+      }
+      for (final sample in decoded.respSamples) {
+        respLineData.add(FlSpot(respDataCounter++, sample));
+      }
+      for (int i = 0; i < decoded.ppgSamples.length; i++) {
+        // For MAX30001, only add PPG when valid
+        if (decoded.ppgValidity != null && !decoded.ppgValidity![i]) continue;
+        ppgLineData.add(FlSpot(ppgDataCounter++, decoded.ppgSamples[i]));
+      }
+
+      if (startDataLogging) {
+        final ecgLog = decoded.ecgLogSamples ?? decoded.ecgSamples;
+        final ppgLog = decoded.ppgLogSamples ?? decoded.ppgSamples;
+        final respLog = decoded.respLogSamples ?? decoded.respSamples;
+        ecgDataLog.addAll(ecgLog);
+        ppgDataLog.addAll(ppgLog);
+        respDataLog.addAll(respLog);
+      }
+
+      if (decoded.heartRate != null) globalHeartRate = decoded.heartRate!;
+      if (decoded.respRate != null) globalRespRate = decoded.respRate!;
+      if (decoded.spo2 != null) {
+        globalSpO2 = decoded.spo2!;
+        displaySpO2 = globalSpO2 == 25 ? "--" : "$globalSpO2 %";
+      }
+      if (decoded.temperature != null) globalTemp = decoded.temperature!;
+    });
+
+    _manageDataWindow(ecgLineData, windowSize);
+    _manageDataWindow(ppgLineData, windowSize);
+    _manageDataWindow(respLineData, windowSize);
+  }
+
+  void _handleHpi6Data(DecodedData decoded, double windowSize) {
+    for (final sample in decoded.ecgSamples) {
+      ecgLineData1.value.add(FlSpot(ecgDataCounter++, sample));
+    }
+    for (final sample in decoded.ecg2Samples) {
+      ecg1LineData1.value.add(FlSpot(ecg1DataCounter++, sample));
+    }
+    for (final sample in decoded.ecg3Samples) {
+      ecg2LineData1.value.add(FlSpot(ecg2DataCounter++, sample));
+    }
+    for (final sample in decoded.respSamples) {
+      respLineData1.value.add(FlSpot(respDataCounter++, sample));
+    }
+    for (int i = 0; i < decoded.ppgSamples.length; i++) {
+      if (decoded.ppgValidity != null && !decoded.ppgValidity![i]) continue;
+      ppgLineData1.value.add(FlSpot(ppgDataCounter++, decoded.ppgSamples[i]));
+    }
+
+    if (ecgDataCounter % updateInterval == 0) {
+      ecgLineData1.notifyListeners();
+      ecg1LineData1.notifyListeners();
+      ecg2LineData1.notifyListeners();
+      respLineData1.notifyListeners();
+      ppgLineData1.notifyListeners();
+    }
+
+    if (decoded.heartRate != null) globalHeartRate = decoded.heartRate!;
+    if (decoded.respRate != null) globalRespRate = decoded.respRate!;
+    if (decoded.spo2 != null) {
+      globalSpO2 = decoded.spo2!;
+      displaySpO2 = globalSpO2 == 25 ? "--" : "$globalSpO2 %";
+    }
+    if (decoded.temperature != null) globalTemp = decoded.temperature!;
+
+    _manageValueNotifierWindow(ecgLineData1, windowSize);
+    _manageValueNotifierWindow(ecg1LineData1, windowSize);
+    _manageValueNotifierWindow(ecg2LineData1, windowSize);
+    _manageValueNotifierWindow(ppgLineData1, windowSize);
+    _manageValueNotifierWindow(respLineData1, windowSize);
   }
 
   Widget displayHeartRateValue() {
