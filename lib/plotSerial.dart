@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -74,10 +76,14 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
   static const List<int> _windowSizeOptions = [3, 6, 9, 12];
   int _plotWindowSeconds = 6; // Default value
 
-  // Add these counters to your _PlotSerialPageState class:
-  int ecgUpdateCounter = 0;
-  int ppgUpdateCounter = 0;
-  int respUpdateCounter = 0;
+  /// Timer-based UI refresh, decoupled from the serial callback chain.
+  /// Data accumulates at full rate; the timer triggers setState at ~30 Hz.
+  Timer? _uiRefreshTimer;
+  bool _stdDataDirty = false;
+
+  int _packetCount = 0;
+  int _chunkCount = 0;
+  int _bytesReceived = 0;
 
   @override
   void initState() {
@@ -88,6 +94,13 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       onError: (msg) => print('PacketFramer: $msg'),
     );
     _decoder = decoderForBoard(widget.selectedPortBoard);
+
+    // Refresh UI at ~5 Hz. fl_chart widget rebuilds are heavyweight (unlike
+    // CustomPainter), so 30 Hz starves the serial port reader of event-loop
+    // time and kills the stream. 5 Hz is smooth enough for waveform viewing.
+    _uiRefreshTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      setStateIfMounted(() {});
+    });
 
     SystemChrome.setPreferredOrientations(
         [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
@@ -103,6 +116,8 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       DeviceOrientation.landscapeRight,
       DeviceOrientation.landscapeLeft,
     ]);
+
+    _uiRefreshTimer?.cancel();
 
     ecgLineData.clear();
     ppgLineData.clear();
@@ -184,15 +199,18 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       final serialStream = SerialPortReader(widget.selectedPort);
       serialStream.stream.listen(
             (event) {
-          for (int i = 0; i < event.length; i++) {
-            _framer.processByte(event[i]);
-          }
+          _chunkCount++;
+          _bytesReceived += event.length;
+          _framer.processChunk(event);
         },
         onError: (error) {
-          print('Serial stream error: $error');
-          _showSerialPortErrorDialog(error.toString());
+          print('[Serial] stream error: $error');
         },
-        cancelOnError: true,
+        onDone: () {
+          print('[Serial] stream done — port closed or reader stopped '
+              '(chunks=$_chunkCount, bytes=$_bytesReceived, packets=$_packetCount)');
+        },
+        cancelOnError: false,
       );
     } catch (e) {
       print('SerialPort exception: $e');
@@ -272,8 +290,6 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
     if (data.isEmpty) {
       return [0, _plotWindowSeconds.toDouble() * boardSamplingRate];
     }
-
-    print("..........."+boardSamplingRate.toString());
 
     double latestX = data.last.x;
     double windowSizeInSamples = _plotWindowSeconds.toDouble() * boardSamplingRate;
@@ -374,6 +390,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
   }
 
   void _onPacketReceived(FramedPacket packet) {
+    _packetCount++;
     final decoded = _decoder?.decode(packet);
     if (decoded == null) return;
 
@@ -388,40 +405,47 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
   }
 
   void _handleStandardData(DecodedData decoded, double windowSize) {
-    setStateIfMounted(() {
-      for (final sample in decoded.ecgSamples) {
-        ecgLineData.add(FlSpot(ecgDataCounter++, sample));
-      }
-      for (final sample in decoded.respSamples) {
-        respLineData.add(FlSpot(respDataCounter++, sample));
-      }
-      for (int i = 0; i < decoded.ppgSamples.length; i++) {
-        // For MAX30001, only add PPG when valid
-        if (decoded.ppgValidity != null && !decoded.ppgValidity![i]) continue;
-        ppgLineData.add(FlSpot(ppgDataCounter++, decoded.ppgSamples[i]));
-      }
+    // Accumulate data without triggering a rebuild on every packet.
+    for (final sample in decoded.ecgSamples) {
+      ecgLineData.add(FlSpot(ecgDataCounter++, sample));
+    }
+    for (final sample in decoded.respSamples) {
+      respLineData.add(FlSpot(respDataCounter++, sample));
+    }
+    for (int i = 0; i < decoded.ppgSamples.length; i++) {
+      // For MAX30001, only add PPG when valid
+      if (decoded.ppgValidity != null && !decoded.ppgValidity![i]) continue;
+      ppgLineData.add(FlSpot(ppgDataCounter++, decoded.ppgSamples[i]));
+    }
+    for (final sample in decoded.ecg2Samples) {
+      ecg1LineData.add(FlSpot(ecg1DataCounter++, sample));
+    }
+    for (final sample in decoded.ecg3Samples) {
+      ecg2LineData.add(FlSpot(ecg2DataCounter++, sample));
+    }
 
-      if (startDataLogging) {
-        final ecgLog = decoded.ecgLogSamples ?? decoded.ecgSamples;
-        final ppgLog = decoded.ppgLogSamples ?? decoded.ppgSamples;
-        final respLog = decoded.respLogSamples ?? decoded.respSamples;
-        ecgDataLog.addAll(ecgLog);
-        ppgDataLog.addAll(ppgLog);
-        respDataLog.addAll(respLog);
-      }
+    if (startDataLogging) {
+      final ecgLog = decoded.ecgLogSamples ?? decoded.ecgSamples;
+      final ppgLog = decoded.ppgLogSamples ?? decoded.ppgSamples;
+      final respLog = decoded.respLogSamples ?? decoded.respSamples;
+      ecgDataLog.addAll(ecgLog);
+      ppgDataLog.addAll(ppgLog);
+      respDataLog.addAll(respLog);
+    }
 
-      if (decoded.heartRate != null) globalHeartRate = decoded.heartRate!;
-      if (decoded.respRate != null) globalRespRate = decoded.respRate!;
-      if (decoded.spo2 != null) {
-        globalSpO2 = decoded.spo2!;
-        displaySpO2 = globalSpO2 == 25 ? "--" : "$globalSpO2 %";
-      }
-      if (decoded.temperature != null) globalTemp = decoded.temperature!;
-    });
+    if (decoded.heartRate != null) globalHeartRate = decoded.heartRate!;
+    if (decoded.respRate != null) globalRespRate = decoded.respRate!;
+    if (decoded.spo2 != null) {
+      globalSpO2 = decoded.spo2!;
+      displaySpO2 = globalSpO2 == 25 ? "--" : "$globalSpO2 %";
+    }
+    if (decoded.temperature != null) globalTemp = decoded.temperature!;
 
     _manageDataWindow(ecgLineData, windowSize);
     _manageDataWindow(ppgLineData, windowSize);
     _manageDataWindow(respLineData, windowSize);
+    _manageDataWindow(ecg1LineData, windowSize);
+    _manageDataWindow(ecg2LineData, windowSize);
   }
 
   void _handleHpi6Data(DecodedData decoded, double windowSize) {
@@ -714,6 +738,19 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
           sizedBoxForCharts(),
         ],
       );
+    } else if (selectedPortBoard == "Move 2 (USB)") {
+      return Column(
+        children: [
+          displayHeartRateValue(),
+          Expanded(child: buildStreamingChart(8, 95, ecgLineData, Colors.green)),
+          displaySpo2Value(),
+          Expanded(child: buildStreamingChart(8, 95, ppgLineData, Colors.green)),
+          Expanded(child: buildStreamingChart(8, 95, respLineData, Colors.red)),
+          Expanded(child: buildStreamingChart(8, 95, ecg1LineData, Colors.purple)),
+          Expanded(child: buildStreamingChart(8, 95, ecg2LineData, Colors.orange)),
+          displayTemperatureValue(),
+        ],
+      );
     } else {
       return Container();
     }
@@ -748,7 +785,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
                   SizedBox(
                     height: SizeConfig.blockSizeVertical * 1,
                   ),
-                  displayCharts(widget.selectedPortBoard),
+                  Expanded(child: displayCharts(widget.selectedPortBoard)),
                 ],
               ),
             )));
@@ -846,10 +883,27 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       case "tinyGSR Breakout (USB)":
       case "MAX30003 ECG Breakout (USB)":
       case "MAX30001 ECG & BioZ Breakout (USB)":
-        return 128;
+      case "Move 2 (USB)":
+        return 100;
       default:
         return 128; // fallback default
     }
+  }
+
+  Widget _buildStatusBar() {
+    return Container(
+      color: Colors.grey[900],
+      padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 12.0),
+      child: Row(
+        children: [
+          Text(
+            'Packets: $_packetCount  |  Chunks: $_chunkCount  |  Bytes: $_bytesReceived  |  '
+            'ECG pts: ${ecgLineData.length}  PPG pts: ${ppgLineData.length}  RESP pts: ${respLineData.length}',
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -908,8 +962,9 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                buildToolbar(), // <-- Toolbar added here
+                buildToolbar(),
                 _buildCharts(),
+                _buildStatusBar(),
               ],
             ),
           ),

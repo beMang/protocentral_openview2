@@ -34,6 +34,8 @@ BoardDecoder? decoderForBoard(String boardName) {
       return MAX30003Decoder();
     case 'MAX30001 ECG & BioZ Breakout (USB)':
       return MAX30001Decoder();
+    case 'Move 2 (USB)':
+      return Move2Decoder();
     default:
       return null;
   }
@@ -292,6 +294,51 @@ class MAX30001Decoder extends BoardDecoder {
       ecgSamples: [ecg],
       ppgSamples: [bioz],
       ppgValidity: [tag == 0],
+    );
+  }
+}
+
+/// Move 2 (USB) — 100 Hz, pktType 5.
+/// Payload layout (26 bytes, all little-endian):
+///   [0-3]   ECG       int32   (AS7058 ECG channel)
+///   [4-7]   PPG Green uint32  (AS7058 primary PPG)
+///   [8-11]  PPG Red   uint32  (AS7058 SpO2 R/IR)
+///   [12-15] PPG IR    uint32  (AS7058 SpO2 R/IR)
+///   [16-19] GSR       uint32  (AS7058 skin conductance, nS)
+///   [20-21] Temp      int16   (AS6221 degC × 100)
+///   [22]    SpO2      uint8   (0 = N/A)
+///   [23]    HR        uint8   (bpm, 0 = N/A)
+///   [24]    RR        uint8   (rpm, 0 = N/A)
+///   [25]    Flags     uint8   (bit0: ECG lead-off)
+///
+/// Channel mapping:
+///   ecgSamples  → ECG
+///   ppgSamples  → PPG Green
+///   respSamples → PPG Red   (reused for second PPG waveform)
+///   ecg2Samples → PPG IR    (reused for third PPG waveform)
+///   ecg3Samples → GSR
+class Move2Decoder extends BoardDecoder {
+  @override
+  DecodedData? decode(FramedPacket packet) {
+    if (packet.pktType != 5) return null;
+    final d = packet.data;
+
+    final ecg = readInt32LE(d, 0).toDouble();
+    final ppgGreen = readUint32LE(d, 4).toDouble();
+    final ppgRed = readUint32LE(d, 8).toDouble();
+    final ppgIR = readUint32LE(d, 12).toDouble();
+    final gsr = readUint32LE(d, 16).toDouble();
+
+    return DecodedData(
+      ecgSamples: [ecg],
+      ppgSamples: [ppgGreen],
+      respSamples: [ppgRed],
+      ecg2Samples: [ppgIR],
+      ecg3Samples: [gsr],
+      heartRate: d[23],
+      spo2: d[22],
+      respRate: d[24],
+      temperature: readInt16LE(d, 20) / 100.0,
     );
   }
 }

@@ -56,10 +56,15 @@ class FramerStats {
 ///
 /// Robustness features:
 /// - Maximum payload length guard (prevents buffer overflow on corrupted length)
-/// - SOF re-detection mid-packet (fast resync after byte loss)
 /// - Timeout detection (abandons stale partial packets)
 /// - Unknown pktType reporting
 /// - Diagnostic counters via [stats]
+///
+/// Note: SOF re-detection mid-payload was removed because the protocol does
+/// not use byte-stuffing. Sensor data (ECG, PPG, etc.) can legitimately
+/// contain the bytes 0x0A 0xFA, which caused false resyncs and dropped
+/// valid packets. The length-guard + EOF check + timeout provide sufficient
+/// error recovery.
 ///
 /// All state is encapsulated — no globals required.
 class PacketFramer {
@@ -92,7 +97,6 @@ class PacketFramer {
   int _pktLen = 0;
   int _posCounter = 0;
   int _pktType = 0;
-  int _prevByte = 0;
 
   int _dataCounter = 0;
   int _ecgRespDataCounter = 0;
@@ -114,10 +118,31 @@ class PacketFramer {
 
   PacketFramer({required this.onPacket, this.onError});
 
-  /// Process a single byte from the serial stream.
-  void processByte(int rxch) {
+  /// Process a chunk of bytes from the serial stream.
+  ///
+  /// This is the preferred entry point — it timestamps once per chunk instead
+  /// of calling DateTime.now() for every byte, which avoids unnecessary
+  /// overhead at high data rates.
+  void processChunk(List<int> data) {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
+    for (int i = 0; i < data.length; i++) {
+      _processByte(data[i], nowMs);
+    }
+    // Update timestamp to actual wall time AFTER processing. Without this,
+    // the next chunk's timeout measurement would include the processing time
+    // of THIS chunk (setState, chart rendering, etc.), causing false timeouts
+    // when the app is busy rendering real-time waveforms.
+    if (_state != _stateInit) {
+      _lastByteTimeMs = DateTime.now().millisecondsSinceEpoch;
+    }
+  }
 
+  /// Process a single byte. Prefer [processChunk] when you have multiple bytes.
+  void processByte(int rxch) {
+    _processByte(rxch, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  void _processByte(int rxch, int nowMs) {
     // --- Timeout guard ---
     // If we're mid-packet and too much time has passed since the last byte,
     // the current packet is stale — abandon it and resync.
@@ -157,7 +182,6 @@ class PacketFramer {
         _dataCounter = 0;
         _ecgRespDataCounter = 0;
         _ppgDataCounter = 0;
-        _prevByte = 0;
         break;
 
       case _statePktLenFound:
@@ -177,30 +201,23 @@ class PacketFramer {
             }
           } else if (_posCounter == _indPktType) {
             _pktType = rxch;
+            // Early pktType validation — reject before consuming the full
+            // payload.  Without this, a false SOF (0x0A 0xFA appearing in
+            // sensor data) consumes pktLen+1 bytes of real data as "payload"
+            // before the EOF check fails, causing long cascading failures.
+            if (_pktType != 2 && _pktType != 3 && _pktType != 4 && _pktType != 5) {
+              stats.packetsDroppedUnknownType++;
+              stats.resyncs++;
+              _resetState();
+              break;
+            }
           }
         } else if (_posCounter < _pktOverhead + _pktLen + 1) {
-          // --- SOF re-detection mid-payload ---
-          // If we see SOF1+SOF2 inside the payload, the current packet is
-          // corrupted (likely lost bytes). Abandon it and restart framing
-          // from the new SOF — this avoids losing TWO packets.
-          if (_prevByte == _sof1 && rxch == _sof2) {
-            stats.resyncs++;
-            stats.packetsDroppedNoEof++;
-            onError?.call(
-                'SOF detected mid-payload at pos $_posCounter — resyncing');
-            _state = _stateSof2Found;
-            _pktLen = 0;
-            _posCounter = _indLen;
-            _dataCounter = 0;
-            _ecgRespDataCounter = 0;
-            _ppgDataCounter = 0;
-            _prevByte = 0;
-            break;
-          }
-          _prevByte = rxch;
-
-          // --- Bounds-checked buffer write ---
-          if (_pktType == 2 && _dataCounter < _dataBuffer.length) {
+          // --- Payload bytes ---
+          // No mid-payload SOF re-detection: the protocol does not use
+          // byte-stuffing, so sensor data can legitimately contain 0x0A 0xFA.
+          // Robustness is provided by the length-guard, EOF check, and timeout.
+          if ((_pktType == 2 || _pktType == 5) && _dataCounter < _dataBuffer.length) {
             _dataBuffer[_dataCounter++] = rxch;
           } else if (_pktType == 3 &&
               _ecgRespDataCounter < _ecgRespBuffer.length) {
@@ -211,7 +228,7 @@ class PacketFramer {
         } else {
           // All data received — check stop byte
           if (rxch == _eof) {
-            if (_pktType == 2 || _pktType == 3 || _pktType == 4) {
+            if (_pktType == 2 || _pktType == 3 || _pktType == 4 || _pktType == 5) {
               stats.packetsReceived++;
               onPacket(FramedPacket(
                 pktType: _pktType,
@@ -231,8 +248,16 @@ class PacketFramer {
             onError?.call(
                 'Expected EOF (0x${_eof.toRadixString(16)}), '
                 'got 0x${rxch.toRadixString(16)} — packet discarded');
+            stats.resyncs++;
           }
           _resetState();
+          // SOF recovery: if the byte that failed the EOF check happens to
+          // be 0x0A, it may be the start of the very next packet.  Transition
+          // to SOF1Found so we don't miss a real packet boundary.
+          if (rxch == _sof1) {
+            _state = _stateSof1Found;
+            _lastByteTimeMs = nowMs;
+          }
         }
         break;
     }
@@ -249,7 +274,6 @@ class PacketFramer {
     _pktLen = 0;
     _posCounter = 0;
     _pktType = 0;
-    _prevByte = 0;
     _dataCounter = 0;
     _ecgRespDataCounter = 0;
     _ppgDataCounter = 0;

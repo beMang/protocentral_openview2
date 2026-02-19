@@ -10,7 +10,8 @@ var listOFUSBBoards = {
   'Pulse Express (USB)',
   'tinyGSR Breakout (USB)',
   'MAX30003 ECG Breakout (USB)',
-  'MAX30001 ECG & BioZ Breakout (USB)'
+  'MAX30001 ECG & BioZ Breakout (USB)',
+  'Move 2 (USB)'
 };
 
 var listOFBLEBoards = {
