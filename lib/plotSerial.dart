@@ -82,8 +82,6 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
   bool _stdDataDirty = false;
 
   int _packetCount = 0;
-  int _chunkCount = 0;
-  int _bytesReceived = 0;
 
   @override
   void initState() {
@@ -91,7 +89,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
 
     _framer = PacketFramer(
       onPacket: _onPacketReceived,
-      onError: (msg) => print('PacketFramer: $msg'),
+      onError: (_) {},
     );
     _decoder = decoderForBoard(widget.selectedPortBoard);
 
@@ -186,8 +184,6 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
   }
 
   void _startSerialListening() async {
-    print("AKW: Started listening to stream");
-
     try {
       // Check if port is open, if not, try to open it
       if (!widget.selectedPort.isOpen) {
@@ -199,17 +195,10 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       final serialStream = SerialPortReader(widget.selectedPort);
       serialStream.stream.listen(
             (event) {
-          _chunkCount++;
-          _bytesReceived += event.length;
           _framer.processChunk(event);
         },
-        onError: (error) {
-          print('[Serial] stream error: $error');
-        },
-        onDone: () {
-          print('[Serial] stream done — port closed or reader stopped '
-              '(chunks=$_chunkCount, bytes=$_bytesReceived, packets=$_packetCount)');
-        },
+        onError: (_) {},
+        onDone: () {},
         cancelOnError: false,
       );
     } catch (e) {
@@ -897,8 +886,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       child: Row(
         children: [
           Text(
-            'Packets: $_packetCount  |  Chunks: $_chunkCount  |  Bytes: $_bytesReceived  |  '
-            'ECG pts: ${ecgLineData.length}  PPG pts: ${ppgLineData.length}  RESP pts: ${respLineData.length}',
+            'Packets: $_packetCount',
             style: const TextStyle(fontSize: 11, color: Colors.white70),
           ),
         ],
