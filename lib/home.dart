@@ -534,16 +534,26 @@ class _HomePageState extends State<HomePage> {
                       return;
                     }
                     
-                    // Configure baud rate based on selected board
+                    // Configure serial port
+                    final config = SerialPortConfig();
+                    config.bits = 8;
+                    config.stopBits = 1;
+                    config.parity = SerialPortParity.none;
+                    config.setFlowControl(SerialPortFlowControl.none);
+
                     if(selectedUSBPortBoard == "Healthypi (USB)"){
-                      serialPort.config.baudRate = 115200;
-                    }else if(selectedUSBPortBoard == "MAX86150 Breakout"){
-                      serialPort.config.baudRate = 57600;
+                      config.baudRate = 115200;
                     } else if(selectedUSBPortBoard == "Healthypi 6 (USB)") {
-                      serialPort.config.baudRate = 921600;
+                      config.baudRate = 921600;
+                    } else if(selectedUSBPortBoard == "MAX86150 Breakout (USB)"){
+                      config.baudRate = 57600;
+                    } else if(selectedUSBPortBoard == "Move 2 (USB)") {
+                      config.baudRate = 115200;
                     } else {
-                      serialPort.config.baudRate = 57600;
+                      config.baudRate = 57600;
                     }
+
+                    serialPort.config = config;
                     
                     // Navigate to plot page
                     Navigator.of(context).pushReplacement(MaterialPageRoute(
