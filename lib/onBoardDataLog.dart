@@ -784,7 +784,7 @@ class _FetchLogsState extends State<FetchLogs> {
             mainAxisSize: MainAxisSize.max,
             children: <Widget>[
               Row(children: <Widget>[
-                Image.asset('assets/proto-online-white.png',
+                Image.asset('assets/ucl_logo.png',
                     fit: BoxFit.fitWidth, height: 30),
                 // GetData(),
               ]),

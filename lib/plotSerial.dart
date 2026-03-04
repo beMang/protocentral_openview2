@@ -907,7 +907,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
           mainAxisAlignment: MainAxisAlignment.start,
           mainAxisSize: MainAxisSize.max,
           children: <Widget>[
-            Image.asset('assets/proto-online-white.png',
+            Image.asset('assets/ucl_logo.png',
                 fit: BoxFit.fitWidth, height: 30),
             SizedBox(
               width: SizeConfig.blockSizeHorizontal * 5,

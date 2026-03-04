@@ -145,7 +145,7 @@ class _QuickScanPageState extends State<QuickScanPage> {
           mainAxisAlignment: MainAxisAlignment.end,
           mainAxisSize: MainAxisSize.max,
           children: <Widget>[
-            Image.asset('assets/proto-online-white.png',
+            Image.asset('assets/ucl_logo.png',
                 fit: BoxFit.fitWidth, height: 30),
           ],
         ),

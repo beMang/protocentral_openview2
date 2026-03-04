@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class hPi4Global {
   static const String UUID_SERV_DIS = "0000180a-0000-1000-8000-00805f9b34fb";
@@ -84,11 +83,6 @@ class hPi4Global {
 
   void logConsole(String logString) {
     print("AKW - " + logString);
-  }
-
-  void launchURL(String _url) async {
-    await launch(_url,
-        forceSafariVC: true, forceWebView: true, enableJavaScript: true);
   }
 
   FutureOr<bool> timeOutConnection(BuildContext context) {

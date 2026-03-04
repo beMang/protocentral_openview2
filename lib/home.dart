@@ -91,7 +91,7 @@ class _HomePageState extends State<HomePage> {
         padding: EdgeInsets.zero,
         children: <Widget>[
           DrawerHeader(
-            child: Image.asset('assets/proto-online-white.png',
+            child: Image.asset('assets/ucl_logo.png',
                 fit: BoxFit.fitWidth, height: 30),
             decoration: BoxDecoration(
               color: hPi4Global.hpi4Color,
@@ -125,7 +125,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 Text(
-                  "© Protocentral Electronics 2020",
+                  "© UCLouvain 2026",
                   style: new TextStyle(fontSize: 12),
                 ),
               ],
@@ -140,25 +140,6 @@ class _HomePageState extends State<HomePage> {
     return ListTile(
       title: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
-            child: OutlinedButton(
-              onPressed: () async {
-                hPi4Global().launchURL("https://protocentral.com/");
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text('protocentral.com',
-                        style: new TextStyle(
-                            fontSize: 16, color: hPi4Global.hpi4Color)),
-                  ],
-                ),
-              ),
-            ),
-          ),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -655,10 +636,10 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: hPi4Global.hpi4Color,
         iconTheme: IconThemeData(color: Colors.white),
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.end,
           mainAxisSize: MainAxisSize.max,
           children: <Widget>[
-            Image.asset('assets/proto-online-white.png',
+            Image.asset('assets/ucl_logo.png',
                 fit: BoxFit.fitWidth, height: 30),
           ],
         ),
