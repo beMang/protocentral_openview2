@@ -11,7 +11,7 @@ import 'states/OpenViewBLEProvider.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
 import 'home.dart';
-import 'generic_plot.dart';
+import 'utils/generic_plot.dart';
 import 'globals.dart';
 import 'utils/sizeConfig.dart';
 import 'onBoardDataLog.dart';

@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 
 import 'home.dart';
-import 'generic_plot.dart';
+import 'utils/generic_plot.dart';
 import 'globals.dart';
 import 'utils/sizeConfig.dart';
 import 'ble/ble_scanner.dart';

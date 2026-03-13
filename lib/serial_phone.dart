@@ -1,12 +1,13 @@
-import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
-import 'package:usb_serial/usb_serial.dart';
+import 'serial/SerialConnector.dart';
+import 'serial/SerialPhoneConnector.dart';
 
 import 'home.dart';
-import 'generic_plot.dart';
+import 'utils/generic_plot.dart';
 import 'globals.dart';
 import 'utils/sizeConfig.dart';
 import 'ble/ble_scanner.dart';
@@ -29,11 +30,7 @@ class _SerialPhonePageState extends State<SerialPhonePage> {
   late final PacketFramer _framer;
   late final BoardDecoder? _decoder;
 
-  UsbPort? _port;
-  StreamSubscription<Uint8List>? _sub;
-  StreamSubscription<UsbEvent>? _usbEventSub;
-  bool usb_attached = false;
-  bool usb_connected = false;
+  late SerialConnector _serial_connector;
 
   final ecgLineData = <FlSpot>[];
   final ppgLineData = <FlSpot>[];
@@ -77,10 +74,18 @@ class _SerialPhonePageState extends State<SerialPhonePage> {
     );
     _decoder = decoderForBoard('Healthypi (USB)');
 
-    SystemChrome.setPreferredOrientations(
-        [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-    _listenUsbEvents();
-    _connect().catchError((e) {
+    SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    if (Platform.isAndroid || Platform.isIOS) {
+      _serial_connector = SerialPhoneConnector((data) {
+        _framer.processChunk(data);
+      }, () {
+        setState(() {});
+      });
+    } else {
+      _showSerialPortErrorDialog("Unsupported, for now.");
+      return;
+    }
+    _serial_connector.connect().catchError((e) {
       _showSerialPortErrorDialog(
           "Failed to connect to the serial device. Please ensure it's properly connected and try again.\n\nError details: $e");
     });
@@ -99,70 +104,9 @@ class _SerialPhonePageState extends State<SerialPhonePage> {
     ppgLineData.clear();
     respLineData.clear();
 
-    _usbEventSub?.cancel();
-    _disconnect();
+    _serial_connector.dispose();
 
     super.dispose();
-  }
-
-  void _listenUsbEvents() {
-    _usbEventSub = UsbSerial.usbEventStream?.listen((event) {
-      if (event.event == UsbEvent.ACTION_USB_ATTACHED) {
-        usb_attached = true;
-        _connect().catchError((e) {
-          _showSerialPortErrorDialog(
-              "Failed to connect to the serial device. Please ensure it's properly connected and try again.\n\nError details: $e");
-        }); // Attempt to connect when a device is attached
-      } else if (event.event == UsbEvent.ACTION_USB_DETACHED) {
-        usb_attached = false;
-        usb_connected = false;
-        _disconnect();
-      }
-      setState(() {});
-    });
-  }
-
-  Future<void> _connect() async {
-    if (_port != null) return;
-
-    final devices = await UsbSerial.listDevices();
-    if (devices.isEmpty) return;
-
-    final device = devices.first;
-    final port = await device.create();
-    if (port == null) return;
-
-    if (!await port.open()) return;
-
-    await port.setDTR(true);
-    await port.setRTS(true);
-    await port.setPortParameters(
-      115200,
-      UsbPort.DATABITS_8,
-      UsbPort.STOPBITS_1,
-      UsbPort.PARITY_NONE,
-    );
-
-    _sub = port.inputStream!.listen((data) {
-      _framer.processChunk(data);
-    });
-
-    _port = port;
-    usb_connected = true;
-    usb_attached = true;
-
-    setState(() {});
-  }
-
-  Future<void> _disconnect() async {
-    await _sub?.cancel();
-    await _port?.close();
-    _sub = null;
-    _port = null;
-    usb_connected = false;
-    usb_attached = false;
-
-    setState(() {});
   }
 
   // Add this helper to show a dialog for serial port errors
@@ -319,7 +263,7 @@ class _SerialPhonePageState extends State<SerialPhonePage> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            "${usb_attached ? (usb_connected ? "Connected to HP5" : "Serial device attached") : "No Serial Device"}",
+            "${_serial_connector.usb_attached ? (_serial_connector.usb_connected ? "Connected to HP5" : "Serial device attached") : "No Serial Device"}",
             style: const TextStyle(
               fontSize: 12,
               color: Colors.white,
@@ -348,8 +292,8 @@ class _SerialPhonePageState extends State<SerialPhonePage> {
                 borderRadius: BorderRadius.circular(8.0),
               ),
               onPressed: () async {
-                if (usb_connected) {
-                  await _disconnect();
+                if (_serial_connector.usb_connected) {
+                  await _serial_connector.disconnect();
                 }
                 if (startDataLogging == true) {
                   startDataLogging = false;

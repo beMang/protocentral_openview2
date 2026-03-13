@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
-import 'globals.dart';
-import 'utils/charts.dart';
+import '../globals.dart';
+import 'charts.dart';
 
 class GenericPlot extends StatefulWidget {
   const GenericPlot(
