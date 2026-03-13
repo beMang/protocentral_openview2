@@ -3,6 +3,8 @@ description: BLE companion app for use with ProtoCentral breakout boards and mod
 
 version: 0.1.0+1
 
+publish_to: none # to allow git dependencies
+
 environment:
   sdk: ^3.3.0
 
@@ -36,6 +38,10 @@ dependencies:
   simple_html_css: ^5.0.0
   flutter_html: ^3.0.0-beta.2
   flutter_switch: ^0.3.2
+
+  usb_serial:
+    git:
+      url: https://github.com/altera2015/usbserial.git
 
 dependency_overrides:
   csv: ^5.0.2

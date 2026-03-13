@@ -11,9 +11,9 @@ import 'states/OpenViewBLEProvider.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
 import 'home.dart';
+import 'generic_plot.dart';
 import 'globals.dart';
 import 'utils/sizeConfig.dart';
-import 'utils/charts.dart';
 import 'onBoardDataLog.dart';
 import 'ble/ble_scanner.dart';
 import 'utils/loadingDialog.dart';
@@ -85,7 +85,6 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
   late Stream<List<int>> _streamSPO2;
   late Stream<List<int>> _streamTemp;
   late Stream<List<int>> _streamHRVResp;
-  late Stream<List<int>> _streamCommand;
   late Stream<List<int>> _streamData;
 
   bool listeningECGStream = false;
@@ -254,10 +253,8 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
 
     streamHRSubscription = _streamHR.listen((event) {
       //print("AKW: Rx Heart Rate: " + event.toString());
-      setStateIfMounted(() {
-        globalHeartRate = event[1];
-        // print("AKW: Rx Heart Rate: " + event[1].toString());
-      });
+      globalHeartRate = event[1];
+      // print("AKW: Rx Heart Rate: " + event[1].toString());
     });
   }
 
@@ -271,14 +268,12 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
     });
 
     streamSPO2Subscription = _streamSPO2.listen((event) {
-      setStateIfMounted(() {
-        globalSpO2 = event[1];
-        if (globalSpO2 == 25) {
-          displaySpO2 = "--";
-        } else {
-          displaySpO2 = globalSpO2.toString() + " %";
-        }
-      });
+      globalSpO2 = event[1];
+      if (globalSpO2 == 25) {
+        displaySpO2 = "--";
+      } else {
+        displaySpO2 = globalSpO2.toString() + " %";
+      }
     });
   }
 
@@ -292,10 +287,8 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
     });
 
     streamTempSubscription = _streamTemp.listen((event) {
-      setStateIfMounted(() {
-        Uint8List u8list = Uint8List.fromList(event);
-        globalTemp = ((hPi4Global.toInt16(u8list, 0).toDouble()) * 0.01);
-      });
+      Uint8List u8list = Uint8List.fromList(event);
+      globalTemp = ((hPi4Global.toInt16(u8list, 0).toDouble()) * 0.01);
     });
   }
 
@@ -309,9 +302,7 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
     });
 
     streamHRVRespSubscription = _streamHRVResp.listen((event) {
-      setStateIfMounted(() {
-        globalRespRate = event[0];
-      });
+      globalRespRate = event[0];
     });
   }
 
@@ -330,12 +321,10 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
         Int32List ecgList = ecgByteData.buffer.asInt32List();
 
         ecgList.forEach((element) {
-          setStateIfMounted(() {
-            ecgLineData.add(FlSpot(ecgDataCounter++, (element.toDouble())));
-            if (startAppLogging == true) {
-              ecgDataLog.add(element.toDouble());
-            }
-          });
+          ecgLineData.add(FlSpot(ecgDataCounter++, (element.toDouble())));
+          if (startAppLogging == true) {
+            ecgDataLog.add(element.toDouble());
+          }
 
           if (ecgDataCounter >= 128 * 6) {
             ecgLineData.removeAt(0);
@@ -366,12 +355,10 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
         Int16List ppgList = ppgByteData.buffer.asInt16List();
 
         ppgList.forEach((element) {
-          setStateIfMounted(() {
-            ppgLineData.add(FlSpot(ppgDataCounter++, (element.toDouble())));
-            if (startAppLogging == true) {
-              ppgDataLog.add(element.toDouble());
-            }
-          });
+          ppgLineData.add(FlSpot(ppgDataCounter++, (element.toDouble())));
+          if (startAppLogging == true) {
+            ppgDataLog.add(element.toDouble());
+          }
 
           if (ppgDataCounter >= 128 * 3) {
             ppgLineData.removeAt(0);
@@ -399,12 +386,10 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
         ByteData respByteData = Uint8List.fromList(event).buffer.asByteData(0);
         Int32List respList = respByteData.buffer.asInt32List();
         respList.forEach((element) {
-          setStateIfMounted(() {
-            respLineData.add(FlSpot(respDataCounter++, (element.toDouble())));
-            if (startAppLogging == true) {
-              respDataLog.add(element.toDouble());
-            }
-          });
+          respLineData.add(FlSpot(respDataCounter++, (element.toDouble())));
+          if (startAppLogging == true) {
+            respDataLog.add(element.toDouble());
+          }
 
           if (respDataCounter >= 256 * 6) {
             respLineData.removeAt(0);
@@ -469,170 +454,9 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
     });
   }
 
-  Widget displayHeartRateValue() {
-    return Column(children: [
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 2,
-          child: Text(
-            "HEART RATE ",
-            style: TextStyle(
-              fontSize: 8,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 3.5,
-          child: Text(
-            globalHeartRate.toString() + " bpm",
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    ]);
-  }
-
-  Widget displayRespirationRateValue() {
-    return Column(children: [
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 2,
-          child: Text(
-            "RESPIRATION RATE ",
-            style: TextStyle(
-              fontSize: 8,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 3.5,
-          child: Text(
-            globalRespRate.toString() + " rpm",
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    ]);
-  }
-
-  Widget displaySpo2Value() {
-    return Column(children: [
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 2,
-          child: Text(
-            "SPO2 ",
-            style: TextStyle(
-              fontSize: 8,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 3.5,
-          child: Text(
-            displaySpO2,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    ]);
-  }
-
-  Widget displayTemperatureValue() {
-    return Column(children: [
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 2,
-          child: Text(
-            "TEMPERATURE ",
-            style: TextStyle(
-              fontSize: 8,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-      Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          color: Colors.transparent,
-          height: SizeConfig.blockSizeVertical * 3.5,
-          child: Text(
-            globalTemp.toStringAsPrecision(3) + "\u00b0 C",
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    ]);
-  }
-
   Widget sizedBoxForCharts() {
     return SizedBox(
       height: SizeConfig.blockSizeVertical * 2,
-    );
-  }
-
-  Widget displayHealthyPiCharts() {
-    if (widget.selectedBoard == "Sensything Ox (BLE)") {
-      return Column(
-        children: [
-          displayHeartRateValue(),
-          buildPlots().buildChart(50, 95, ppgLineData, Colors.yellow),
-          sizedBoxForCharts(),
-          displaySpo2Value(),
-        ],
-      );
-    } else {
-      return Container();
-    }
-  }
-
-  Widget displayHealthyPiMoveCharts() {
-    return Column(
-      children: [
-        displayHeartRateValue(),
-        buildPlots().buildChart(16, 70, ecgLineData, Colors.green),
-        displaySpo2Value(),
-        buildPlots().buildChart(17, 70, ppgLineData, Colors.yellow),
-        displayRespirationRateValue(),
-        buildPlots().buildChart(16, 70, respLineData, Colors.blue),
-        displayTemperatureValue(),
-      ],
     );
   }
 
@@ -1071,190 +895,186 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
   }
 
   Widget buildCharts() {
-    if (widget.currentDevice.name.contains("healthypi move") ||
-        widget.currentDevice.name.contains("healthypi")) {
-      return Expanded(
-          child: Row(children: <Widget>[
-        ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Container(
-              //color: Colors.white,
-              color: Colors.transparent,
-              width: SizeConfig.blockSizeHorizontal * 20,
-              child: Padding(
-                padding: const EdgeInsets.all(0.0),
-                child: Column(
-                  children: <Widget>[
-                    StartAndStopButton(),
-                    LogToAppButton(),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
-                      child: MaterialButton(
-                        minWidth: 50.0,
-                        //height: 30.0,
-                        color: startFlashLogging ? Colors.red : Colors.white,
-                        child: Row(
-                          children: <Widget>[
-                            startFlashLogging?Text('Stop Logging',
-                                style: new TextStyle(
-                                    fontSize: 16.0, color: Colors.white)):Text('Log to SD card',
-                                style: new TextStyle(
-                                    fontSize: 16.0, color: Colors.black)),
-                          ],
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                        ),
-                        onPressed: () async {
-                          if (startFlashLogging == true) {
-                            _sendEndLogtoFlashCommand();
-                            setState(() {
-                              startFlashLogging = false;
-                            });
-                          } else {
-                            await Future.delayed(Duration(seconds: 1),
-                                () async {
-                              await setMTU(widget.currentDevice.id);
-                            });
-                            await Future.delayed(Duration(seconds: 1),
-                                () async {
-                              await startListeningData();
-                            });
-                            await sendStartSessionCommand();
-
-                          }
-                        },
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
-                      child: MaterialButton(
-                        minWidth: 50.0,
-                        color: Colors.white,
-                        child: Row(
-                          children: <Widget>[
-                            Text('Get Logs',
-                                style: new TextStyle(
-                                    fontSize: 16.0, color: Colors.black)),
-                          ],
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                        ),
-                        onPressed: () async {
-                          if (startStreaming == false) {
-                            await Future.delayed(Duration(seconds: 1),
-                                    () async {
-                                  await setMTU(widget.currentDevice.id);
-                                });
-                            _sendSDCardStatusCheckCommand();
-                            await Future.delayed(Duration(seconds: 1),
-                                    () async {
-                                  await startListeningData();
-                                });
-                            if(sdCardStatusCheck == true){
-                              showSDCardNotFoundDialog();
-                            }else{
-                              Navigator.of(context)
-                                  .pushReplacement(MaterialPageRoute(
-                                  builder: (_) => FetchLogs(
-                                    selectedBoard: widget.selectedBoard,
-                                    selectedDevice: widget.selectedDevice,
-                                    currentDevice: widget.currentDevice,
-                                    fble: widget.fble,
-                                    currConnection: widget.currConnection,
-                                  )));
-                            }
-
-                          } else {
-                            showStopStreamingDialog('Please stop streaming to view the logs.');
-                          }
-                        },
-                      ),
-                    ),
-                    showSetTime(),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
-                      child: MaterialButton(
-                        minWidth: 50.0,
-                        //color: Colors.white,
-                        color: Colors.red,
-                        child: Row(
-                          children: <Widget>[
-                            Text('Disconnect',
-                                style: new TextStyle(
-                                    fontSize: 16.0, color: Colors.black)),
-                          ],
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                        ),
-                        onPressed: () async {
-                          if (startFlashLogging == true &&
-                              startAppLogging == false) {
-                            startFlashLogging = false;
-                            showEndFlashingDialog();
-                          } else if (startAppLogging == true &&
-                              startFlashLogging == false) {
-                            startAppLogging = false;
-                            writeLogDataToFile(
-                                ecgDataLog, ppgDataLog, respDataLog, context);
-                            closeAllStreams();
-                            await _disconnect();
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(
-                                  builder: (_) => HomePage(title: 'OpenView')),
-                            );
-                          } else if (startFlashLogging == true &&
-                              startAppLogging == true) {
-                            startAppLogging = false;
-                            startFlashLogging = false;
-                            writeLogDataToFile(
-                                ecgDataLog, ppgDataLog, respDataLog, context);
-                            showEndFlashingDialog();
-                          } else {
-                            closeAllStreams();
-                            await _disconnect();
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(
-                                  builder: (_) => HomePage(title: 'OpenView')),
-                            );
-                          }
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              )),
-        ),
-        SizedBox(
-          width: SizeConfig.blockSizeHorizontal * 1,
-        ),
-        Container(
-            color: Colors.black,
-            width: SizeConfig.blockSizeHorizontal * 76,
+    return Expanded(
+        child: Row(children: <Widget>[
+      ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+            //color: Colors.white,
+            color: Colors.transparent,
+            width: SizeConfig.blockSizeHorizontal * 20,
             child: Padding(
               padding: const EdgeInsets.all(0.0),
               child: Column(
                 children: <Widget>[
-                  displayHealthyPiMoveCharts(),
+                  StartAndStopButton(),
+                  LogToAppButton(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+                    child: MaterialButton(
+                      minWidth: 50.0,
+                      //height: 30.0,
+                      color: startFlashLogging ? Colors.red : Colors.white,
+                      child: Row(
+                        children: <Widget>[
+                          startFlashLogging?Text('Stop Logging',
+                              style: new TextStyle(
+                                  fontSize: 16.0, color: Colors.white)):Text('Log to SD card',
+                              style: new TextStyle(
+                                  fontSize: 16.0, color: Colors.black)),
+                        ],
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      onPressed: () async {
+                        if (startFlashLogging == true) {
+                          _sendEndLogtoFlashCommand();
+                          setState(() {
+                            startFlashLogging = false;
+                          });
+                        } else {
+                          await Future.delayed(Duration(seconds: 1),
+                              () async {
+                            await setMTU(widget.currentDevice.id);
+                          });
+                          await Future.delayed(Duration(seconds: 1),
+                              () async {
+                            await startListeningData();
+                          });
+                          await sendStartSessionCommand();
+
+                        }
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+                    child: MaterialButton(
+                      minWidth: 50.0,
+                      color: Colors.white,
+                      child: Row(
+                        children: <Widget>[
+                          Text('Get Logs',
+                              style: new TextStyle(
+                                  fontSize: 16.0, color: Colors.black)),
+                        ],
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      onPressed: () async {
+                        if (startStreaming == false) {
+                          await Future.delayed(Duration(seconds: 1),
+                                  () async {
+                                await setMTU(widget.currentDevice.id);
+                              });
+                          _sendSDCardStatusCheckCommand();
+                          await Future.delayed(Duration(seconds: 1),
+                                  () async {
+                                await startListeningData();
+                              });
+                          if(sdCardStatusCheck == true){
+                            showSDCardNotFoundDialog();
+                          }else{
+                            Navigator.of(context)
+                                .pushReplacement(MaterialPageRoute(
+                                builder: (_) => FetchLogs(
+                                  selectedBoard: widget.selectedBoard,
+                                  selectedDevice: widget.selectedDevice,
+                                  currentDevice: widget.currentDevice,
+                                  fble: widget.fble,
+                                  currConnection: widget.currConnection,
+                                )));
+                          }
+
+                        } else {
+                          showStopStreamingDialog('Please stop streaming to view the logs.');
+                        }
+                      },
+                    ),
+                  ),
+                  showSetTime(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+                    child: MaterialButton(
+                      minWidth: 50.0,
+                      //color: Colors.white,
+                      color: Colors.red,
+                      child: Row(
+                        children: <Widget>[
+                          Text('Disconnect',
+                              style: new TextStyle(
+                                  fontSize: 16.0, color: Colors.black)),
+                        ],
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      onPressed: () async {
+                        if (startFlashLogging == true &&
+                            startAppLogging == false) {
+                          startFlashLogging = false;
+                          showEndFlashingDialog();
+                        } else if (startAppLogging == true &&
+                            startFlashLogging == false) {
+                          startAppLogging = false;
+                          writeLogDataToFile(
+                              ecgDataLog, ppgDataLog, respDataLog, context);
+                          closeAllStreams();
+                          await _disconnect();
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(
+                                builder: (_) => HomePage(title: 'OpenView')),
+                          );
+                        } else if (startFlashLogging == true &&
+                            startAppLogging == true) {
+                          startAppLogging = false;
+                          startFlashLogging = false;
+                          writeLogDataToFile(
+                              ecgDataLog, ppgDataLog, respDataLog, context);
+                          showEndFlashingDialog();
+                        } else {
+                          closeAllStreams();
+                          await _disconnect();
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(
+                                builder: (_) => HomePage(title: 'OpenView')),
+                          );
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
             )),
-      ]));
-    } else {
-      return Expanded(
-          child: Container(
-              color: Colors.black,
-              child: Padding(
-                padding: const EdgeInsets.all(0.0),
-                child: Column(
-                  children: <Widget>[
-                    displayHealthyPiCharts(),
-                  ],
+      ),
+      SizedBox(
+        width: SizeConfig.blockSizeHorizontal * 1,
+      ),
+      Container(
+          color: Colors.black,
+          width: SizeConfig.blockSizeHorizontal * 76,
+          child: Padding(
+            padding: const EdgeInsets.all(0.0),
+            child: Column(
+              children: <Widget>[
+                Expanded(
+                  child: GenericPlot(
+                    ecgDataBuilder: () => ecgLineData,
+                    spo2DataBuilder: () => ppgLineData,
+                    respDataBuilder: () => respLineData,
+                    samplingRate: 128,
+                    heartRateBuilder: () => globalHeartRate,
+                    spo2TextBuilder: () => displaySpO2,
+                    respRateBuilder: () => globalRespRate,
+                    temperatureBuilder: () => globalTemp,
+                  ),
                 ),
-              )));
-    }
+              ],
+            ),
+          )),
+    ]));
   }
 
   void setStateIfMounted(f) {

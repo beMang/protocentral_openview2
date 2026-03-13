@@ -9,9 +9,8 @@ import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
-import 'package:csv/csv.dart';
 
-import 'plots.dart';
+import 'ble_page.dart';
 import 'globals.dart';
 import 'utils/variables.dart';
 import 'ble/ble_scanner.dart';
@@ -135,7 +134,6 @@ class _FetchLogsState extends State<FetchLogs> {
   }
 
   int logIndexNumElements = 0;
-  static const int WISER_FILE_HEADER_LEN = 10;
 
   Future<void> showDownloadSuccessDialog() async {
     return showDialog<void>(
@@ -182,7 +180,6 @@ class _FetchLogsState extends State<FetchLogs> {
 
   Future<void> writeLogDataToFile(List<int> fileData, int sessionID, int fileNum) async {
       Directory _directory = Directory("");
-      String fileUTF8Data = " ";
       if (Platform.isAndroid) {
         // Redirects it to download folder in android
         _directory = Directory("/storage/emulated/0/Download");
@@ -282,11 +279,6 @@ class _FetchLogsState extends State<FetchLogs> {
 
 
         if (currentFileDataCounter >= (sessionSize)) {
-
-          if (currentFileDataCounter > sessionSize) {
-            int diffData = currentFileDataCounter - sessionSize;
-          }
-
           await streamCommandSubscription.cancel();
           await streamDataSubscription.cancel();
 

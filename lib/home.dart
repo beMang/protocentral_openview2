@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'package:OpenView2/serial_phone.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,11 +10,11 @@ import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:signal_strength_indicator/signal_strength_indicator.dart';
 
-import 'plots.dart';
+import 'ble_page.dart';
 import 'about.dart';
 import 'globals.dart';
 import 'quickScan.dart';
-import 'plotSerial.dart';
+import 'serial_page.dart';
 import 'utils/sizeConfig.dart';
 import 'utils/variables.dart';
 import 'ble/ble_scanner.dart';
@@ -98,6 +99,18 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           QuickscanListTile(),
+          ListTile(
+            leading: Icon(Icons.usb_outlined),
+            title: Text('USB Serial for phone'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => SerialPhonePage(),
+                      fullscreenDialog: true));
+            },
+          ),
           ListTile(
             leading: Icon(Icons.info_outlined),
             title: Text('About'),
