@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_libserialport/flutter_libserialport.dart';
+import 'serial/SerialConnector.dart';
+import 'serial/SerialPhoneConnector.dart';
+import 'serial/SerialDesktopConnector.dart';
 
 import 'home.dart';
 import 'utils/generic_plot.dart';
@@ -14,28 +17,21 @@ import 'states/OpenViewBLEProvider.dart';
 import 'package:flutter/src/foundation/change_notifier.dart';
 import 'protocol/protocol.dart';
 
-class PlotSerialPage extends StatefulWidget {
-  const PlotSerialPage({
-    Key? key,
-    required this.selectedPort,
-    required this.selectedSerialPort,
-    required this.selectedPortBoard,
-  }) : super();
-
-  final SerialPort selectedPort;
-  final String selectedSerialPort;
-  final String selectedPortBoard;
+class SerialPage extends StatefulWidget {
+  final String portName;
+  SerialPage(this.portName) : super();
 
   @override
-  _PlotSerialPageState createState() => _PlotSerialPageState();
+  _SerialPageState createState() => _SerialPageState();
 }
 
-class _PlotSerialPageState extends State<PlotSerialPage> {
+class _SerialPageState extends State<SerialPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
   Key key = UniqueKey();
 
   late final PacketFramer _framer;
   late final BoardDecoder? _decoder;
+  late SerialConnector _serial_connector;
 
   final ecgLineData = <FlSpot>[];
   final ppgLineData = <FlSpot>[];
@@ -77,11 +73,28 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       onPacket: _onPacketReceived,
       onError: (_) {},
     );
-    _decoder = decoderForBoard(widget.selectedPortBoard);
+    _decoder = decoderForBoard('Healthypi (USB)');
 
-    SystemChrome.setPreferredOrientations(
-        [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-    _startSerialListening();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    if (Platform.isAndroid || Platform.isIOS) {
+      _serial_connector = SerialPhoneConnector((data) {
+        _framer.processChunk(data);
+      }, () {
+        setState(() {});
+      });
+    } else if (Platform.isLinux || Platform.isWindows) {
+      _serial_connector = SerialDesktopConnector((data) {
+        _framer.processChunk(data);
+      }, () {
+        setState(() {});
+      }, widget.portName);
+    } else {
+      throw UnsupportedError("Unsupported platform for serial connection");
+    }
+    _serial_connector.connect().catchError((e) {
+      _showSerialPortErrorDialog(
+          "Failed to connect to the serial device. Please ensure it's properly connected and try again.\n\nError details: $e");
+    });
   }
 
   @override
@@ -97,31 +110,9 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
     ppgLineData.clear();
     respLineData.clear();
 
+    _serial_connector.dispose();
+
     super.dispose();
-  }
-
-  void _startSerialListening() async {
-    try {
-      // Check if port is open, if not, try to open it
-      if (!widget.selectedPort.isOpen) {
-        if (!widget.selectedPort.openReadWrite()) {
-          throw SerialPortError('Device not configured');
-        }
-      }
-
-      final serialStream = SerialPortReader(widget.selectedPort);
-      serialStream.stream.listen(
-            (event) {
-          _framer.processChunk(event);
-        },
-        onError: (_) {},
-        onDone: () {},
-        cancelOnError: false,
-      );
-    } catch (e) {
-      print('SerialPort exception: $e');
-      _showSerialPortErrorDialog(e.toString());
-    }
   }
 
   // Add this helper to show a dialog for serial port errors
@@ -169,8 +160,6 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
       },
     );
   }
-
-  int updateInterval = 125; // Only update every 64 new points
 
   /// Helper method to manage data window size for regular List<FlSpot>
   /// Keep enough data for smooth scrolling but not excessive memory usage
@@ -280,7 +269,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            "Connected To:    ${widget.selectedSerialPort}/ ${widget.selectedPortBoard}",
+            "${_serial_connector.usb_attached ? (_serial_connector.usb_connected ? "Connected to HP5" : "Serial device attached") : "No Serial Device"}",
             style: const TextStyle(
               fontSize: 12,
               color: Colors.white,
@@ -309,8 +298,8 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
                 borderRadius: BorderRadius.circular(8.0),
               ),
               onPressed: () async {
-                if (widget.selectedPort.isOpen) {
-                  widget.selectedPort.close();
+                if (_serial_connector.usb_connected) {
+                  await _serial_connector.disconnect();
                 }
                 if (startDataLogging == true) {
                   startDataLogging = false;
@@ -334,27 +323,7 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
   }
 
   /// Returns the sampling rate based on the selected board.
-  int get boardSamplingRate {
-    switch (widget.selectedPortBoard) {
-      case "Healthypi (USB)":
-        return 128;
-      case "Healthypi 6 (USB)":
-        return 500;
-      case "ADS1292R Breakout/Shield (USB)":
-      case "ADS1293 Breakout/Shield (USB)":
-      case "AFE4490 Breakout/Shield (USB)":
-      case "Sensything Ox (USB)":
-      case "MAX86150 Breakout (USB)":
-      case "Pulse Express (USB)":
-      case "tinyGSR Breakout (USB)":
-      case "MAX30003 ECG Breakout (USB)":
-      case "MAX30001 ECG & BioZ Breakout (USB)":
-      case "Move 2 (USB)":
-        return 100;
-      default:
-        return 128; // fallback default
-    }
-  }
+  int boardSamplingRate = 128;
 
   @override
   Widget build(BuildContext context) {
@@ -413,15 +382,9 @@ class _PlotSerialPageState extends State<PlotSerialPage> {
               children: <Widget>[
                 Expanded(
                   child: GenericPlot(
-                    ecgDataBuilder: () => widget.selectedPortBoard == 'Healthypi 6 (USB)'
-                        ? ecgLineData1.value
-                        : ecgLineData,
-                    spo2DataBuilder: () => widget.selectedPortBoard == 'Healthypi 6 (USB)'
-                        ? ppgLineData1.value
-                        : ppgLineData,
-                    respDataBuilder: () => widget.selectedPortBoard == 'Healthypi 6 (USB)'
-                        ? respLineData1.value
-                        : respLineData,
+                  ecgDataBuilder: () => ecgLineData,
+                  spo2DataBuilder: () => ppgLineData,
+                  respDataBuilder: () => respLineData,
                     samplingRate: boardSamplingRate,
                     heartRateBuilder: () => globalHeartRate,
                     spo2TextBuilder: () => displaySpO2,

@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'dart:async';
-import 'package:OpenView2/serial_phone.dart';
+import 'package:OpenView2/serial_page.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,7 +14,6 @@ import 'ble_page.dart';
 import 'about.dart';
 import 'globals.dart';
 import 'quickScan.dart';
-import 'serial_page.dart';
 import 'utils/sizeConfig.dart';
 import 'utils/variables.dart';
 import 'ble/ble_scanner.dart';
@@ -32,9 +31,7 @@ String pcCurrentDeviceName = "";
 String selectedBLEBoard = 'Healthypi (BLE)';
 String selectedBLEPortBoard = 'Healthypi (BLE)';
 
-String selectedUSBBoard = 'Healthypi (USB)';
 String selectedUSBPort = 'Port';
-String selectedUSBPortBoard = 'Healthypi (USB)';
 
 bool connectedToDevice = false;
 
@@ -85,6 +82,25 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Widget USBPhoneTile() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return ListTile(
+        leading: Icon(Icons.usb_outlined),
+        title: Text('USB Serial for phone'),
+        onTap: () {
+          Navigator.pop(context);
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => SerialPage('null'),
+                  fullscreenDialog: true));
+        },
+      );
+    } else {
+      return Container();
+    }
+  }
+
   Widget buildAppDrawer() {
     return Drawer(
       child: ListView(
@@ -99,18 +115,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           QuickscanListTile(),
-          ListTile(
-            leading: Icon(Icons.usb_outlined),
-            title: Text('USB Serial for phone'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => SerialPhonePage(),
-                      fullscreenDialog: true));
-            },
-          ),
+          USBPhoneTile(),
           ListTile(
             leading: Icon(Icons.info_outlined),
             title: Text('About'),
@@ -407,37 +412,6 @@ class _HomePageState extends State<HomePage> {
             spacing: 10.0,
             runSpacing: 8.0,
             children: [
-              Text("Select Board:",
-                  style: TextStyle(color: Colors.black, fontSize: 14.0)),
-              DropdownButton(
-                underline: SizedBox(),
-                dropdownColor: hPi4Global.hpi4Color,
-                hint: selectedUSBPortBoard.isEmpty
-                    ? Text('Select Board')
-                    : Text(
-                        selectedUSBPortBoard,
-                        style:
-                            TextStyle(color: hPi4Global.hpi4Color, fontSize: 14.0),
-                      ),
-                isExpanded: false,
-                iconSize: 30.0,
-                style: TextStyle(color: Colors.white, fontSize: 14.0),
-                items: listOFUSBBoards.map(
-                  (val) {
-                    return DropdownMenuItem<String>(
-                      value: val,
-                      child: Text(val),
-                    );
-                  },
-                ).toList(),
-                onChanged: (value) {
-                  setState(
-                    () {
-                      selectedUSBPortBoard = value as String;
-                    },
-                  );
-                },
-              ),
               Text("Select Port:",
                   style: TextStyle(color: Colors.black, fontSize: 14.0)),
               DropdownButton(
@@ -446,9 +420,9 @@ class _HomePageState extends State<HomePage> {
                 hint: selectedUSBPort.isEmpty
                     ? Text('Select Serial Port')
                     : Text(
-                      selectedUSBPort,
-                        style:
-                            TextStyle(color: hPi4Global.hpi4Color, fontSize: 14.0),
+                        selectedUSBPort,
+                        style: TextStyle(
+                            color: hPi4Global.hpi4Color, fontSize: 14.0),
                       ),
                 isExpanded: false,
                 iconSize: 30.0,
@@ -464,7 +438,7 @@ class _HomePageState extends State<HomePage> {
                 onChanged: (value) {
                   setState(
                     () {
-                     selectedUSBPort = value as String;
+                      selectedUSBPort = value as String;
                     },
                   );
                 },
@@ -482,7 +456,8 @@ class _HomePageState extends State<HomePage> {
                 minWidth: 80.0,
                 color: Colors.green,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8.0, vertical: 4.0),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
@@ -493,8 +468,8 @@ class _HomePageState extends State<HomePage> {
                       ),
                       SizedBox(width: 4.0),
                       Text('Start',
-                          style:
-                              new TextStyle(fontSize: 16.0, color: Colors.white)),
+                          style: new TextStyle(
+                              fontSize: 16.0, color: Colors.white)),
                     ],
                   ),
                 ),
@@ -503,7 +478,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 onPressed: () async {
                   print("Opening $selectedUSBPort");
-                  
+
                   if (selectedUSBPort.isEmpty || selectedUSBPort == 'Port') {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -513,49 +488,11 @@ class _HomePageState extends State<HomePage> {
                     );
                     return;
                   }
-                  
+
                   try {
-                    serialPort = SerialPort(selectedUSBPort);
-                    if (!serialPort.openReadWrite()) {
-                      print(SerialPort.lastError);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Failed to open serial port: ${SerialPort.lastError}'),
-                          backgroundColor: Colors.red,
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
-                      return;
-                    }
-                    
-                    // Configure serial port
-                    final config = SerialPortConfig();
-                    config.bits = 8;
-                    config.stopBits = 1;
-                    config.parity = SerialPortParity.none;
-                    config.setFlowControl(SerialPortFlowControl.none);
-
-                    if(selectedUSBPortBoard == "Healthypi (USB)"){
-                      config.baudRate = 115200;
-                    } else if(selectedUSBPortBoard == "Healthypi 6 (USB)") {
-                      config.baudRate = 921600;
-                    } else if(selectedUSBPortBoard == "MAX86150 Breakout (USB)"){
-                      config.baudRate = 57600;
-                    } else if(selectedUSBPortBoard == "Move 2 (USB)") {
-                      config.baudRate = 115200;
-                    } else {
-                      config.baudRate = 57600;
-                    }
-
-                    serialPort.config = config;
-                    
                     // Navigate to plot page
                     Navigator.of(context).pushReplacement(MaterialPageRoute(
-                        builder: (_) => PlotSerialPage(
-                              selectedPort: serialPort,
-                              selectedSerialPort: selectedUSBPort,
-                              selectedPortBoard: selectedUSBPortBoard,
-                            )));
+                        builder: (_) => SerialPage(selectedUSBPort)));
                   } catch (e) {
                     print('Error opening serial port: $e');
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -572,7 +509,8 @@ class _HomePageState extends State<HomePage> {
                 minWidth: 80.0,
                 color: Colors.red,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8.0, vertical: 4.0),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
@@ -583,8 +521,8 @@ class _HomePageState extends State<HomePage> {
                       ),
                       SizedBox(width: 4.0),
                       Text('Stop',
-                          style:
-                              new TextStyle(fontSize: 16.0, color: Colors.white)),
+                          style: new TextStyle(
+                              fontSize: 16.0, color: Colors.white)),
                     ],
                   ),
                 ),
