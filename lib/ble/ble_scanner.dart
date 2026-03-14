@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:meta/meta.dart';
-import 'package:provider/provider.dart';
 
 import 'reactive_state.dart';
 

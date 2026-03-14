@@ -14,7 +14,6 @@ import 'utils/sizeConfig.dart';
 import 'ble/ble_scanner.dart';
 import 'utils/logDataToFile.dart';
 import 'states/OpenViewBLEProvider.dart';
-import 'package:flutter/src/foundation/change_notifier.dart';
 import 'protocol/protocol.dart';
 
 class SerialPage extends StatefulWidget {

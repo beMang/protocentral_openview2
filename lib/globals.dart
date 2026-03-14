@@ -165,7 +165,7 @@ class LoadingIndicator extends StatelessWidget {
 
     return Container(
         padding: EdgeInsets.all(16),
-        color: Colors.black.withOpacity(0.7),
+        color: Colors.black.withValues(alpha: .7),
         child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
