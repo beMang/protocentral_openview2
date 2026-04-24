@@ -109,7 +109,25 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
   int globalSpO2 = 0;
   int globalRespRate = 0;
 
+
   String displaySpO2 = "--";
+
+  // Keep BLE chart scaling consistent with GenericPlot's samplingRate input.
+  static const int _samplingRate = 125;
+  static const int _maxPlotWindowSeconds = 12;
+
+  double get _bufferWindowInSamples =>
+      _samplingRate.toDouble() * _maxPlotWindowSeconds;
+
+  /// Helper method to manage data window size for regular List<FlSpot>
+  /// Keep enough data for smooth scrolling but not excessive memory usage
+  void _manageDataWindow(List<FlSpot> dataList, double windowSizeInSamples) {
+    // Keep 2x the window size to ensure smooth scrolling and avoid gaps
+    double bufferSize = windowSizeInSamples * 2.0;
+    while (dataList.length > bufferSize) {
+      dataList.removeAt(0);
+    }
+  }
 
   @override
   void initState() {
@@ -190,12 +208,12 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
 
   void dataFormatBasedOnBoardsSelection() async {
     if (widget.selectedBoard == 'Sensything Ox (BLE)') {
-      startPPG16Listening();
+      startPPG32Listening();
       await startListeningHR();
       await startListeningSPO2();
     } else {
       startECG32Listening();
-      startPPG16Listening();
+      startPPG32Listening();
       startRESP32Listening();
       await startListeningHR();
       await startListeningSPO2();
@@ -325,9 +343,7 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
             ecgDataLog.add(element.toDouble());
           }
 
-          if (ecgDataCounter >= 128 * 6) {
-            ecgLineData.removeAt(0);
-          }
+          _manageDataWindow(ecgLineData, _bufferWindowInSamples);
         });
       },
       onError: (Object error) {
@@ -338,7 +354,7 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
     );
   }
 
-  void startPPG16Listening() async {
+  void startPPG32Listening() async {
     print("AKW: Started listening to ppg stream");
     listeningPPGStream = true;
 
@@ -351,7 +367,7 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
       (event) {
         // print("AKW: Rx PPG: " + event.length.toString());
         ByteData ppgByteData = Uint8List.fromList(event).buffer.asByteData(0);
-        Int16List ppgList = ppgByteData.buffer.asInt16List();
+        Int32List ppgList = ppgByteData.buffer.asInt32List();
 
         ppgList.forEach((element) {
           ppgLineData.add(FlSpot(ppgDataCounter++, (element.toDouble())));
@@ -359,9 +375,7 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
             ppgDataLog.add(element.toDouble());
           }
 
-          if (ppgDataCounter >= 128 * 3) {
-            ppgLineData.removeAt(0);
-          }
+          _manageDataWindow(ppgLineData, _bufferWindowInSamples);
         });
       },
       onError: (Object error) {
@@ -390,9 +404,7 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
             respDataLog.add(element.toDouble());
           }
 
-          if (respDataCounter >= 256 * 6) {
-            respLineData.removeAt(0);
-          }
+          _manageDataWindow(respLineData, _bufferWindowInSamples);
         });
       },
       onError: (Object error) {
@@ -1063,7 +1075,7 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
                     ecgDataBuilder: () => ecgLineData,
                     spo2DataBuilder: () => ppgLineData,
                     respDataBuilder: () => respLineData,
-                    samplingRate: 128,
+                    samplingRate: _samplingRate,
                     heartRateBuilder: () => globalHeartRate,
                     spo2TextBuilder: () => displaySpO2,
                     respRateBuilder: () => globalRespRate,
@@ -1192,9 +1204,6 @@ class _WaveFormsPageState extends State<WaveFormsPage> {
             dataFormatBasedOnBoardsSelection();
           } else {
             closeAllStreams();
-            ecgLineData.removeAt(0);
-            ppgLineData.removeAt(0);
-            respLineData.removeAt(0);
             setState(() {
               startStreaming = false;
             });

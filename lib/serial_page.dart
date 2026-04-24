@@ -322,7 +322,7 @@ class _SerialPageState extends State<SerialPage> {
   }
 
   /// Returns the sampling rate based on the selected board.
-  int boardSamplingRate = 128;
+  int boardSamplingRate = 125;
 
   @override
   Widget build(BuildContext context) {
