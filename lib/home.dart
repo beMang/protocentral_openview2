@@ -14,6 +14,7 @@ import 'ble_page.dart';
 import 'about.dart';
 import 'globals.dart';
 import 'quickScan.dart';
+import 'serial_uart_page.dart';
 import 'utils/sizeConfig.dart';
 import 'utils/variables.dart';
 import 'ble/ble_scanner.dart';
@@ -101,6 +102,25 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Widget UARTDebugTile() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return ListTile(
+        leading: Icon(Icons.usb_outlined),
+        title: Text('UART Serial Display'),
+        onTap: () {
+          Navigator.pop(context);
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => UartSerialPage(),
+                  fullscreenDialog: true));
+        },
+      );
+    } else {
+      return Container();
+    }
+  }
+
   Widget buildAppDrawer() {
     return Drawer(
       child: ListView(
@@ -116,6 +136,7 @@ class _HomePageState extends State<HomePage> {
           ),
           QuickscanListTile(),
           USBPhoneTile(),
+          UARTDebugTile(),
           ListTile(
             leading: Icon(Icons.info_outlined),
             title: Text('About'),
