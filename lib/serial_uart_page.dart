@@ -70,7 +70,7 @@ class _UartSerialPageState extends State<UartSerialPage> {
 
     final hasRootAccess = await _ensureRootAccess();
     if (!hasRootAccess) {
-      return;
+        return;
     }
 
     final started = await _startRootReader();
@@ -145,7 +145,7 @@ class _UartSerialPageState extends State<UartSerialPage> {
       });
 
       final result = await _runRootCommand(
-        'test -e $_devicePath || exit 2; test -r $_devicePath -a -w $_devicePath || chmod 666 $_devicePath',
+        'test -e $_devicePath || exit 2',
       );
 
       if (result == null) {
