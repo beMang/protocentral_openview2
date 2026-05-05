@@ -238,7 +238,7 @@ class _HomePageState extends State<HomePage> {
         await _setMTU(currentDevice.id);
         if (connectedToDevice == true) {
           Navigator.of(context).pushReplacement(MaterialPageRoute(
-              builder: (_) => WaveFormsPage(
+              builder: (_) => BLEPage(
                     selectedBoard: selectedBLEBoard,
                     selectedDevice: pcCurrentDeviceName,
                     currentDevice: currentDevice,

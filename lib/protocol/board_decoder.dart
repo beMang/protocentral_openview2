@@ -94,14 +94,10 @@ class HealthypiDecoder extends BoardDecoder {
       ecgSamples: [ecg.toDouble()],
       respSamples: [resp.toDouble()],
       ppgSamples: [ppg.toDouble()],
-      // Logging: ECG signed, PPG/RESP raw (unsigned interpretation)
+      // Logging: use same signed 32-bit interpretation as display
       ecgLogSamples: [ecg.toDouble()],
-      ppgLogSamples: [
-        (d[9] | d[10] << 8 | d[11] << 16 | d[12] << 24).toDouble()
-      ],
-      respLogSamples: [
-        (d[4] | d[5] << 8 | d[6] << 16 | d[7] << 24).toDouble()
-      ],
+      ppgLogSamples: [ppg.toDouble()],
+      respLogSamples: [resp.toDouble()],
       spo2: d[19],
       heartRate: d[20],
       respRate: d[21],

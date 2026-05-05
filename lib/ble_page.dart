@@ -18,8 +18,8 @@ import 'ble/ble_scanner.dart';
 import 'utils/loadingDialog.dart';
 import 'utils/logDataToFile.dart';
 
-class WaveFormsPage extends StatefulWidget {
-  WaveFormsPage({
+class BLEPage extends StatefulWidget {
+  BLEPage({
     Key? key,
     required this.selectedBoard,
     required this.selectedDevice,
@@ -35,10 +35,10 @@ class WaveFormsPage extends StatefulWidget {
   final StreamSubscription<ConnectionStateUpdate> currConnection;
 
   @override
-  _WaveFormsPageState createState() => _WaveFormsPageState();
+  _BLEPageState createState() => _BLEPageState();
 }
 
-class _WaveFormsPageState extends State<WaveFormsPage> {
+class _BLEPageState extends State<BLEPage> {
   GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
   Key key = UniqueKey();
 

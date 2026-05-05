@@ -162,7 +162,7 @@ class _FetchLogsState extends State<FetchLogs> {
               onPressed: () async {
                 Navigator.of(context).pushReplacement(
                   MaterialPageRoute(
-                      builder: (_) => WaveFormsPage(
+                      builder: (_) => BLEPage(
                             selectedBoard: widget.selectedBoard,
                             selectedDevice: widget.selectedDevice,
                             currentDevice: widget.currentDevice,
@@ -415,7 +415,7 @@ class _FetchLogsState extends State<FetchLogs> {
     }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-          builder: (_) => WaveFormsPage(
+          builder: (_) => BLEPage(
                 selectedBoard: widget.selectedBoard,
                 selectedDevice: widget.selectedDevice,
                 currentDevice: widget.currentDevice,
